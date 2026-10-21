@@ -203,6 +203,9 @@ Inductive instruction: Type :=
   | Psarq_ri (rd: ireg) (n: int)
   | Pshld_ri (rd: ireg) (r1: ireg) (n: int)
   | Prorl_ri (rd: ireg) (n: int)
+  | Psallzx_ri (rd: ireg) (n: int)    (**r [sall], viewed as producing a 64-bit result *)
+  | Pshrlzx_ri (rd: ireg) (n: int)    (**r [shrl], viewed as producing a 64-bit result *)
+  | Pandlzx_ri (rd: ireg) (n: int)    (**r [andl], viewed as producing a 64-bit result *)
   | Prorq_ri (rd: ireg) (n: int)
   | Pcmpl_rr (r1 r2: ireg)
   | Pcmpq_rr (r1 r2: ireg)
@@ -833,6 +836,12 @@ Definition exec_instr (f: function) (i: instruction) (rs: regset) (m: mem) : out
       Next (nextinstr_nf
               (rs#rd <- (Val.or (Val.shl rs#rd (Vint n))
                                 (Val.shru rs#r1 (Vint (Int.sub Int.iwordsize n)))))) m
+  | Psallzx_ri rd n =>
+      Next (nextinstr_nf (rs#rd <- (Val.longofintu (Val.shl rs#rd (Vint n))))) m
+  | Pshrlzx_ri rd n =>
+      Next (nextinstr_nf (rs#rd <- (Val.longofintu (Val.shru rs#rd (Vint n))))) m
+  | Pandlzx_ri rd n =>
+      Next (nextinstr_nf (rs#rd <- (Val.longofintu (Val.and rs#rd (Vint n))))) m
   | Prorl_ri rd n =>
       Next (nextinstr_nf (rs#rd <- (Val.ror rs#rd (Vint n)))) m
   | Prorq_ri rd n =>

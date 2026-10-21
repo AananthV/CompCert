@@ -194,10 +194,14 @@ Processing options:
   -ffloat-const-prop <n>  Control constant propagation of floats
                    (<n>=0: none, <n>=1: limited, <n>=2: full; default is full)
   -fcse          Perform common subexpression elimination [on]
+  -floop-rotate  Perform loop rotation [on]
+  -flicm         Perform loop-invariant code motion [on]
+  -floadfwd      Perform global forwarding of stored and loaded values [on]
   -fredundancy   Perform redundancy elimination [on]
   -finline       Perform inlining of functions [on]
   -finline-functions-called-once Integrate functions only required by their
                  single caller [on]
+  -finline-small-functions Integrate functions whose body is small [on]
   -fif-conversion Perform if-conversion (generation of conditional moves) [on]
 Code generation options: (use -fno-<opt> to turn off -f<opt>)
   -fpic / -fPIC  Generate position-independent code [off]
@@ -251,7 +255,9 @@ let dump_mnemonics destfile =
 
 let optimization_options = [
   option_ftailcalls; option_fifconversion; option_fconstprop; option_fcse;
-  option_fredundancy; option_finline; option_finline_functions_called_once;
+  option_floadfwd; option_fredundancy; option_flooprotate; option_flicm;
+  option_finline; option_finline_functions_called_once;
+  option_finline_small_functions;
 ]
 
 let set_all opts () = List.iter (fun r -> r := true) opts
@@ -385,9 +391,13 @@ let cmdline_actions =
   @ f_opt "if-conversion" option_fifconversion
   @ f_opt "const-prop" option_fconstprop
   @ f_opt "cse" option_fcse
+  @ f_opt "loadfwd" option_floadfwd
+  @ f_opt "loop-rotate" option_flooprotate
+  @ f_opt "licm" option_flicm
   @ f_opt "redundancy" option_fredundancy
   @ f_opt "inline" option_finline
   @ f_opt "inline-functions-called-once" option_finline_functions_called_once
+  @ f_opt "inline-small-functions" option_finline_small_functions
 (* Code generation options *)
   @ f_opt "fpu" option_ffpu
   @ f_opt "sse" option_ffpu (* backward compatibility *)

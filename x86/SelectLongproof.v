@@ -92,7 +92,7 @@ Proof.
   red; intros. destruct (is_intconst a) as [n|] eqn:C.
 - econstructor; split. apply eval_longconst.
   exploit is_intconst_sound; eauto. intros; subst x. auto.
-- TrivialExists.
+- unfold longofintu_base. destruct (longofintu_base_match a); InvEval; TrivialExists.
 Qed.
 
 Theorem eval_longofint: unary_constructor_sound longofint Val.longofint.
@@ -150,30 +150,67 @@ Proof.
 - TrivialExists.
 Qed.
 
+Lemma is_shllimm_sound:
+  forall le a n t v,
+  is_shllimm a = Some (n, t) ->
+  eval_expr ge sp e m le a v ->
+  exists v1, eval_expr ge sp e m le t v1 /\ v = Val.shll v1 (Vint n).
+Proof.
+  unfold is_shllimm; intros.
+  assert (SC: forall v1 sc k,
+              Int64.shl' Int64.one (Int.repr k) = Int64.repr sc -> 0 <= k < 64 ->
+              Val.addl (Val.mull v1 (Vlong (Int64.repr sc))) (Vlong (Int64.repr 0)) =
+              Val.shll v1 (Vint (Int.repr k))).
+  { intros. destruct v1; simpl; auto.
+    replace (Int.ltu (Int.repr k) Int64.iwordsize') with true.
+    rewrite Int64.add_zero. rewrite <- H1. rewrite <- Int64.shl'_mul. auto.
+    unfold Int.ltu. change (Int.unsigned Int64.iwordsize') with 64.
+    rewrite Int.unsigned_repr by (unfold Int.max_unsigned; simpl; lia).
+    rewrite zlt_true by lia. auto. }
+  destruct a; try discriminate. destruct o; try discriminate.
+- destruct e0; try discriminate. destruct e1; try discriminate.
+  inv H. InvEval. exists v1; auto.
+- destruct a; try discriminate.
+  destruct e0; try discriminate. destruct e1; try discriminate.
+  destruct (zeq z0 0); try discriminate. subst z0.
+  InvEval.
+  destruct (zeq z 2). subst z. inv H. exists v1; split; auto. apply SC; auto. lia.
+  destruct (zeq z 4). subst z. inv H. exists v1; split; auto. apply SC; auto. lia.
+  destruct (zeq z 8). subst z. inv H. exists v1; split; auto. apply SC; auto. lia.
+  discriminate.
+Qed.
+
+Lemma eval_orl_shl_shru:
+  forall le a n2 t2 dflt x y,
+  eval_expr ge sp e m le a x ->
+  eval_expr ge sp e m le t2 y ->
+  (exists v, eval_expr ge sp e m le dflt v /\ Val.lessdef (Val.orl x (Val.shrlu y (Vint n2))) v) ->
+  exists v, eval_expr ge sp e m le (orl_shl_shru a n2 t2 dflt) v
+         /\ Val.lessdef (Val.orl x (Val.shrlu y (Vint n2))) v.
+Proof.
+  intros until y; intros EA ET DFLT. unfold orl_shl_shru.
+  destruct (is_shllimm a) as [[n1 t1]|] eqn:SH; auto.
+  exploit is_shllimm_sound; eauto. intros (v1 & EV1 & EQ). subst x.
+  predSpec Int.eq Int.eq_spec (Int.add n1 n2) Int64.iwordsize'; auto.
+  destruct (same_expr_pure t1 t2) eqn:?; auto.
+  exploit eval_same_expr; eauto. intros [EQ1 EQ2]; subst.
+  exists (Val.rorl y (Vint n2)); split. EvalOp.
+  destruct y; simpl; auto.
+  destruct (Int.ltu n1 Int64.iwordsize') eqn:N1; auto.
+  destruct (Int.ltu n2 Int64.iwordsize') eqn:N2; auto.
+  simpl. rewrite <- Int64.or_ror'; auto.
+Qed.
+
 Theorem eval_orl: binary_constructor_sound orl Val.orl.
 Proof.
   unfold orl; destruct Archi.splitlong. apply SplitLongproof.eval_orl.
   red; intros.
   assert (DEFAULT: exists v, eval_expr ge sp e m le (Eop Oorl (a:::b:::Enil)) v /\ Val.lessdef (Val.orl x y) v) by TrivialExists.
-  assert (ROR: forall v n1 n2,
-    Int.add n1 n2 = Int64.iwordsize' ->
-    Val.lessdef (Val.orl (Val.shll v (Vint n1)) (Val.shrlu v (Vint n2)))
-                (Val.rorl v (Vint n2))).
-  { intros. destruct v; simpl; auto.
-    destruct (Int.ltu n1 Int64.iwordsize') eqn:N1; auto.
-    destruct (Int.ltu n2 Int64.iwordsize') eqn:N2; auto.
-    simpl. rewrite <- Int64.or_ror'; auto. }
   destruct (orl_match a b).
 - InvEval. rewrite Val.orl_commut. apply eval_orlimm; auto.
 - InvEval. apply eval_orlimm; auto.
-- predSpec Int.eq Int.eq_spec (Int.add n1 n2) Int64.iwordsize'; auto.
-  destruct (same_expr_pure t1 t2) eqn:?; auto.
-  InvEval. exploit eval_same_expr; eauto. intros [EQ1 EQ2]; subst.
-  exists (Val.rorl v0 (Vint n2)); split. EvalOp. apply ROR; auto.
-- predSpec Int.eq Int.eq_spec (Int.add n1 n2) Int64.iwordsize'; auto.
-  destruct (same_expr_pure t1 t2) eqn:?; auto.
-  InvEval. exploit eval_same_expr; eauto. intros [EQ1 EQ2]; subst.
-  exists (Val.rorl v1 (Vint n2)); split. EvalOp. rewrite Val.orl_commut. apply ROR; auto.
+- InvEval. apply eval_orl_shl_shru; auto.
+- InvEval. rewrite Val.orl_commut in *. apply eval_orl_shl_shru; auto.
 - apply DEFAULT.
 Qed.
 
@@ -203,6 +240,70 @@ Proof.
 - TrivialExists.
 Qed.
 
+Lemma eval_shllimm_base:
+  forall n, Int.ltu n Int64.iwordsize' = true ->
+  unary_constructor_sound (fun e => shllimm_base e n) (fun v => Val.shll v (Vint n)).
+Proof.
+  intros; red; intros. unfold shllimm_base. destruct (shift_is_scale n).
+- TrivialExists. simpl. destruct x; simpl; auto.
+  rewrite H. rewrite ! Int64.repr_unsigned. rewrite Int64.shl'_one_two_p.
+  rewrite ! Int64.shl'_mul_two_p. rewrite Int64.add_zero. auto.
+- TrivialExists.
+Qed.
+
+Lemma zext_bits_sound:
+  forall le a k v,
+  zext_bits a = Some k ->
+  eval_expr ge sp e m le a v ->
+  0 < k < Int.zwordsize /\ v = Val.zero_ext k v.
+Proof.
+  unfold zext_bits; intros.
+  assert (R: forall v1 k, 0 < k < Int.zwordsize -> Val.zero_ext k (Val.zero_ext k v1) = Val.zero_ext k v1).
+  { intros. destruct v1; simpl; auto. rewrite Int.zero_ext_idem by lia; auto. }
+  destruct a; try discriminate.
+- destruct o; try discriminate; inv H; inv H0;
+  (split; [compute; intuition congruence|]);
+  match goal with
+  | [ EV: eval_operation _ _ _ ?vl _ = Some _ |- _ ] =>
+      destruct vl as [|v1 [|]]; simpl in EV; inv EV; rewrite R; auto; compute; intuition congruence
+  end.
+- destruct m0; inv H; inv H0; (split; [compute; intuition congruence|]);
+  destruct vaddr; try discriminate; simpl in H7;
+  destruct (zle _ _) in H7; try discriminate; exact (Mem.load_cast _ _ _ _ _ H7).
+Qed.
+
+Lemma shll_longofintu_small:
+  forall v k n,
+  0 < k < Int.zwordsize -> Int.unsigned n + k <= 32 -> v = Val.zero_ext k v ->
+  Val.shll (Val.longofintu v) (Vint n) = Val.longofintu (Val.shl v (Vint n)).
+Proof.
+  intros. destruct v; simpl; auto. inv H1.
+  assert (LT1: Int.ltu n Int64.iwordsize' = true).
+  { unfold Int.ltu. apply zlt_true. change (Int.unsigned Int64.iwordsize') with 64. lia. }
+  assert (LT2: Int.ltu n Int.iwordsize = true).
+  { unfold Int.ltu. apply zlt_true. change (Int.unsigned Int.iwordsize) with 32. lia. }
+  rewrite LT1, LT2. simpl. f_equal.
+  assert (A: 0 <= Int.unsigned i < two_p k).
+  { rewrite H3. rewrite Int.zero_ext_mod by lia.
+    apply Z.mod_pos_bound. generalize (two_p_gt_ZERO k); lia. }
+  assert (B: two_p k * two_p (Int.unsigned n) <= two_p 32).
+  { rewrite <- two_p_is_exp by (generalize (Int.unsigned_range n); lia).
+    apply two_p_monotone. generalize (Int.unsigned_range n); lia. }
+  assert (C: two_p (Int.unsigned n) > 0)
+    by (apply two_p_gt_ZERO; generalize (Int.unsigned_range n); lia).
+  assert (D: 0 <= Int.unsigned i * two_p (Int.unsigned n) < two_p 32) by nia.
+  change (two_p 32) with Int.modulus in *.
+  assert (E: Int.modulus * Int.modulus = Int64.modulus) by reflexivity.
+  rewrite Int64.shl'_mul_two_p, Int.shl_mul_two_p. unfold Int64.mul, Int.mul.
+  assert (F: two_p 1 <= two_p k) by (apply two_p_monotone; lia).
+  change (two_p 1) with 2 in F.
+  rewrite (Int.unsigned_repr (two_p (Int.unsigned n)))
+    by (unfold Int.max_unsigned; nia).
+  rewrite <- H3. rewrite Int.unsigned_repr by (unfold Int.max_unsigned; lia).
+  generalize Int.modulus_pos; intros MP.
+  rewrite ! Int64.unsigned_repr; auto; unfold Int64.max_unsigned; nia.
+Qed.
+
 Theorem eval_shllimm: forall n, unary_constructor_sound (fun e => shllimm e n) (fun v => Val.shll v (Vint n)).
 Proof.
   intros; unfold shllimm. destruct Archi.splitlong eqn:SL. apply SplitLongproof.eval_shllimm; auto.
@@ -225,10 +326,13 @@ Proof.
   TrivialExists. simpl. destruct v1; simpl; auto.
   rewrite LT. rewrite ! Int64.repr_unsigned. rewrite Int64.shl'_one_two_p.
   rewrite ! Int64.shl'_mul_two_p.  rewrite Int64.mul_add_distr_l. auto.
-- destruct (shift_is_scale n); auto.
-  TrivialExists. simpl. destruct x; simpl; auto.
-  rewrite LT. rewrite ! Int64.repr_unsigned. rewrite Int64.shl'_one_two_p.
-  rewrite ! Int64.shl'_mul_two_p. rewrite Int64.add_zero. auto.
+- unfold zext_shl_ok. destruct (zext_bits t1) as [k|] eqn:ZB.
+  destruct (zle (Int.unsigned n + k) 32).
+  exploit zext_bits_sound; eauto. intros [K V].
+  TrivialExists. simpl. erewrite shll_longofintu_small; eauto.
+  apply eval_shllimm_base; auto. EvalOp.
+  apply eval_shllimm_base; auto. EvalOp.
+- apply eval_shllimm_base; auto.
 - TrivialExists. constructor; eauto. constructor. EvalOp. simpl; eauto. constructor. auto.
 Qed.
 

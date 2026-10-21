@@ -115,6 +115,9 @@ let print_operation reg pp = function
   | Ohighlong, [r1] -> fprintf pp "highlong(%a)" reg r1
   | Ocast32signed, [r1] -> fprintf pp "long32signed(%a)" reg r1
   | Ocast32unsigned, [r1] -> fprintf pp "long32unsigned(%a)" reg r1
+  | Ozextshlimm n, [r1] -> fprintf pp "long32unsigned(%a << %ld)" reg r1 (camlint_of_coqint n)
+  | Ozextshruimm n, [r1] -> fprintf pp "long32unsigned(%a >>u %ld)" reg r1 (camlint_of_coqint n)
+  | Ozextandimm n, [r1] -> fprintf pp "long32unsigned(%a & %ld)" reg r1 (camlint_of_coqint n)
   | Onegl, [r1] -> fprintf pp "(-l %a)" reg r1
   | Osubl, [r1;r2] -> fprintf pp "%a -l %a" reg r1 reg r2
   | Omull, [r1;r2] -> fprintf pp "%a *l %a" reg r1 reg r2

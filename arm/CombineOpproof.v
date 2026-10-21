@@ -197,4 +197,15 @@ Transparent Val.sub.
    simpl. erewrite combine_cond_sound; eauto.
 Qed.
 
+Lemma addr_deltas_sound:
+  forall addr1 vl1 addr2 vl2 b1 ofs1 b2 ofs2,
+  eval_addressing ge sp addr1 (map valu vl1) = Some (Vptr b1 ofs1) ->
+  eval_addressing ge sp addr2 (map valu vl2) = Some (Vptr b2 ofs2) ->
+  addr_deltas get addr1 vl1 addr2 vl2 <> nil ->
+  exists d, In d (addr_deltas get addr1 vl1 addr2 vl2)
+         /\ Vptr b2 ofs2 = Vptr b1 (Ptrofs.add ofs1 (Ptrofs.repr d)).
+Proof using get_sound.
+  unfold addr_deltas; intros; congruence.
+Qed.
+
 End COMBINE.

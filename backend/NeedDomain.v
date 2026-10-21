@@ -1953,7 +1953,13 @@ Definition nmem_add (nm: nmem) (p: aptr) (sz: Z) : nmem :=
           NMem (ISet.remove (Ptrofs.unsigned ofs) (Ptrofs.unsigned ofs + sz) stk) gl
       | Stack =>
           NMem ISet.empty gl
-      | _ => nmem_all
+      | Glob | Nonstack =>
+          (**r all globals become live, but the stack frame is unaffected *)
+          NMem stk (PTree.empty _)
+      | Pbot =>
+          nm
+      | Ptop =>
+          nmem_all
       end
   end.
 
@@ -1966,7 +1972,8 @@ Lemma nlive_add:
   nlive (nmem_add nm p sz) b i.
 Proof.
   intros. unfold nmem_add. destruct nm. apply nlive_all.
-  inv H1; try (apply nlive_all).
+  inv H1; try (apply nlive_all);
+  try (constructor; simpl; intros; [congruence | rewrite PTree.gempty in *; discriminate]).
   - (* Gl id ofs *)
     assert (Genv.find_symbol ge id = Some b) by (eapply H; eauto).
     destruct gl!id as [iv|] eqn:NG.
@@ -1999,7 +2006,10 @@ Lemma incl_nmem_add:
   forall nm b i p sz,
   nlive nm b i -> nlive (nmem_add nm p sz) b i.
 Proof.
-  intros. inversion H; subst. unfold nmem_add; destruct p; try (apply nlive_all).
+  intros. inversion H; subst. unfold nmem_add; destruct p; try (apply nlive_all);
+  try (split; simpl; intros; [auto | rewrite PTree.gempty in *; discriminate]).
+- (* Pbot *)
+  auto.
 - (* Gl id ofs *)
   destruct gl!id as [iv|] eqn:NG.
   + split; simpl; intros. auto.

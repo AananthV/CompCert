@@ -49,11 +49,22 @@ Definition longofint (e: expr) :=
   | None =>  Eop Ocast32signed (e ::: Enil)
   end.
 
+(** 32-bit operations implicitly zero-extend their result to 64 bits.
+  We take advantage of this for unsigned shifts and logical ``and''
+  with an immediate, which are frequent in array indices. *)
+
+Nondetfunction longofintu_base (e: expr) :=
+  match e with
+  | Eop (Oshruimm n) (t:::Enil) => Eop (Ozextshruimm n) (t:::Enil)
+  | Eop (Oandimm n) (t:::Enil) => Eop (Ozextandimm n) (t:::Enil)
+  | _ => Eop Ocast32unsigned (e ::: Enil)
+  end.
+
 Definition longofintu (e: expr) :=
   if Archi.splitlong then SplitLong.longofintu e else
   match is_intconst e with
   | Some n => longconst (Int64.repr (Int.unsigned n))
-  | None =>  Eop Ocast32unsigned (e ::: Enil)
+  | None =>  longofintu_base e
   end.
 
 Nondetfunction notl (e: expr) :=
@@ -93,19 +104,43 @@ Nondetfunction orlimm (n1: int64) (e2: expr) :=
   | _ => Eop (Oorlimm n1) (e2:::Enil)
   end.
 
+(** Recognize left shifts by an immediate amount, including those
+  that [shllimm] turned into [leaq] instructions. *)
+
+Definition is_shllimm (e: expr) : option (int * expr) :=
+  match e with
+  | Eop (Oshllimm n) (t:::Enil) => Some (n, t)
+  | Eop (Oleal (Ascaled sc ofs)) (t:::Enil) =>
+      if zeq ofs 0 then
+        if zeq sc 2 then Some (Int.repr 1, t)
+        else if zeq sc 4 then Some (Int.repr 2, t)
+        else if zeq sc 8 then Some (Int.repr 3, t)
+        else None
+      else None
+  | _ => None
+  end.
+
+(** [orl_shl_shru e1 n2 t2 dflt] is [e1 | (t2 >>u n2)], or [dflt] if
+  this is not a rotate. *)
+
+Definition orl_shl_shru (e1: expr) (n2: int) (t2: expr) (dflt: expr) :=
+  match is_shllimm e1 with
+  | Some (n1, t1) =>
+      if Int.eq (Int.add n1 n2) Int64.iwordsize' && same_expr_pure t1 t2
+      then Eop (Ororlimm n2) (t1:::Enil)
+      else dflt
+  | None => dflt
+  end.
+
 Nondetfunction orl (e1: expr) (e2: expr) :=
   if Archi.splitlong then SplitLong.orl e1 e2 else
   match e1, e2 with
   | Eop (Olongconst n1) Enil, t2 => orlimm n1 t2
   | t1, Eop (Olongconst n2) Enil => orlimm n2 t1
-  | Eop (Oshllimm n1) (t1:::Enil), Eop (Oshrluimm n2) (t2:::Enil) =>
-      if Int.eq (Int.add n1 n2) Int64.iwordsize' && same_expr_pure t1 t2
-      then Eop (Ororlimm n2) (t1:::Enil)
-      else Eop Oorl (e1:::e2:::Enil)
-  | Eop (Oshrluimm n2) (t2:::Enil), Eop (Oshllimm n1) (t1:::Enil) =>
-      if Int.eq (Int.add n1 n2) Int64.iwordsize' && same_expr_pure t1 t2
-      then Eop (Ororlimm n2) (t1:::Enil)
-      else Eop Oorl (e1:::e2:::Enil)
+  | t1, Eop (Oshrluimm n2) (t2:::Enil) =>
+      orl_shl_shru t1 n2 t2 (Eop Oorl (e1:::e2:::Enil))
+  | Eop (Oshrluimm n2) (t2:::Enil), t1 =>
+      orl_shl_shru t1 n2 t2 (Eop Oorl (e1:::e2:::Enil))
   | _, _ =>
       Eop Oorl (e1:::e2:::Enil)
   end.
@@ -128,6 +163,33 @@ Nondetfunction xorl (e1: expr) (e2: expr) :=
   | _, _ => Eop Oxorl (e1:::e2:::Enil)
   end.
 
+(** Number of significant low bits of a 32-bit integer expression,
+  if statically known to be small. *)
+
+Definition zext_bits (e: expr) : option Z :=
+  match e with
+  | Eload Mint8unsigned _ _ => Some 8
+  | Eload Mint16unsigned _ _ => Some 16
+  | Eop Ocast8unsigned _ => Some 8
+  | Eop Ocast16unsigned _ => Some 16
+  | _ => None
+  end.
+
+(** [zext_shl_ok e n] holds if [(longofintu e) << n] can be computed
+  as a 32-bit shift [e << n] followed by a zero extension,
+  i.e. if no significant bits of [e] are shifted out of the low 32 bits. *)
+
+Definition zext_shl_ok (e: expr) (n: int) : bool :=
+  match zext_bits e with
+  | Some k => zle (Int.unsigned n + k) 32
+  | None => false
+  end.
+
+Definition shllimm_base (e1: expr) (n: int) :=
+  if shift_is_scale n
+  then Eop (Oleal (Ascaled (Int64.unsigned (Int64.shl' Int64.one n)) 0)) (e1:::Enil)
+  else Eop (Oshllimm n) (e1:::Enil).
+
 Nondetfunction shllimm (e1: expr) (n: int) :=
   if Archi.splitlong then SplitLong.shllimm e1 n else
   if Int.eq n Int.zero then e1 else
@@ -146,10 +208,12 @@ Nondetfunction shllimm (e1: expr) (n: int) :=
         then Eop (Oleal (Ascaled (Int64.unsigned (Int64.shl' Int64.one n))
                                  (Int64.unsigned (Int64.shl' (Int64.repr n1) n)))) (t1:::Enil)
         else Eop (Oshllimm n) (e1:::Enil)
+    | Eop Ocast32unsigned (t1:::Enil) =>
+        if zext_shl_ok t1 n
+        then Eop (Ozextshlimm n) (t1:::Enil)
+        else shllimm_base e1 n
     | _ =>
-        if shift_is_scale n
-        then Eop (Oleal (Ascaled (Int64.unsigned (Int64.shl' Int64.one n)) 0)) (e1:::Enil)
-        else Eop (Oshllimm n) (e1:::Enil)
+        shllimm_base e1 n
     end.
 
 Nondetfunction shrluimm (e1: expr) (n: int) :=

@@ -98,6 +98,14 @@ Extract Constant Compopts.optim_constprop =>
   "fun _ -> !Clflags.option_fconstprop".
 Extract Constant Compopts.optim_CSE =>
   "fun _ -> !Clflags.option_fcse".
+Extract Constant Looprot.rotate_oracle => "Looprotaux.rotate_oracle".
+Extract Constant LICM.licm_oracle => "LICMaux.licm_oracle".
+Extract Constant Compopts.optim_looprot =>
+  "fun _ -> !Clflags.option_flooprotate".
+Extract Constant Compopts.optim_licm =>
+  "fun _ -> !Clflags.option_flicm".
+Extract Constant Compopts.optim_loadfwd =>
+  "fun _ -> !Clflags.option_floadfwd".
 Extract Constant Compopts.optim_redundancy =>
   "fun _ -> !Clflags.option_fredundancy".
 Extract Constant Compopts.thumb =>

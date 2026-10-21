@@ -128,7 +128,7 @@ Hint Resolve mk_mov_label: labels.
 Remark mk_shrximm_label:
   forall n k c, mk_shrximm n k = OK c -> tail_nolabel k c.
 Proof.
-  intros. monadInv H; TailNoLabel.
+  unfold mk_shrximm; intros. destruct (Int.eq n Int.one); TailNoLabel.
 Qed.
 Hint Resolve mk_shrximm_label: labels.
 

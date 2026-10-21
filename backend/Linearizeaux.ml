@@ -100,15 +100,86 @@ let basic_blocks f joins =
   in
     start_block f.fn_entrypoint; !blocks
 
-(* Flatten basic blocks in decreasing order of minpc *)
+(* Sort basic blocks in decreasing order of minpc *)
 
-let flatten_blocks blks =
+let sort_blocks blks =
   let cmp_minpc (mpc1, _) (mpc2, _) =
     if mpc1 = mpc2 then 0 else if mpc1 > mpc2 then -1 else 1
   in
-    List.flatten (List.map snd (List.sort cmp_minpc blks))
+    List.map snd (List.sort cmp_minpc blks)
+
+(* Placement of loop latches.
+
+   Consider a block [B] that ends with an unconditional branch to a block [H]
+   placed earlier, typically a block that increments the induction variable
+   of a loop and branches back to the loop header [H].  Moreover, assume
+   that [B] starts at a join point, e.g. the end of a conditional
+   at the end of the loop body.  Placing [B] just before [H] turns the
+   branch from [B] to [H] into a fall-through.  The only predecessor of [B]
+   that can fall through into it is the block placed just before [B],
+   which now has to branch to [B]; the other predecessors of [B]
+   (there is at least one) branch to it in both cases.  Hence, the number
+   of branches executed per loop iteration never increases, and decreases
+   by one on the paths that reach [B] via a branch.  The price to pay is an
+   additional branch on loop entry, from the block placed just before [H].
+
+   If [B] is not a join point, it is not worth moving: there is no gain in
+   terms of branches, and experiments show that turning
+   [H: if (c) goto exit; B; goto H] into [goto H; B; H: if (!c) goto B]
+   can be slower.
+
+   We never move a block before the first block, which contains the entry
+   point of the function, and we move at most one block before a given
+   block [H]. *)
+
+let place_latches f joins blocks =
+  let first_pc = function
+    | pc :: _ -> P.to_int pc
+    | [] -> assert false in
+  let rec last_pc = function
+    | [pc] -> pc
+    | _ :: l -> last_pc l
+    | [] -> assert false in
+  let rec branch_target = function
+    | [] -> None
+    | [Lbranch s] -> Some (P.to_int s)
+    | _ :: b -> branch_target b in
+  let target blk =
+    match PTree.get (last_pc blk) f.fn_code with
+    | Some b -> branch_target b
+    | None -> None in
+  (* [before] maps the first pc of a block [H] to the block
+     to be placed just before [H]. *)
+  let before = Hashtbl.create 17 in
+  let moved = Hashtbl.create 17 in
+  let rec scan seen = function
+    | [] -> ()
+    | blk :: rest ->
+        let pc = first_pc blk in
+        begin match target blk with
+        | Some h when IntSet.mem pc joins
+                   && IntSet.mem h seen
+                   && not (Hashtbl.mem before h)
+                   && not (Hashtbl.mem before pc) ->
+            Hashtbl.add before h blk;
+            Hashtbl.add moved pc ()
+        | _ -> ()
+        end;
+        scan (IntSet.add pc seen) rest in
+  match blocks with
+  | [] -> []
+  | entry :: others ->
+      scan IntSet.empty others;
+      let place blk =
+        let pc = first_pc blk in
+        if Hashtbl.mem moved pc then []
+        else match Hashtbl.find_opt before pc with
+             | Some b -> [b; blk]
+             | None -> [blk] in
+      entry :: List.concat_map place others
 
 (* Build the enumeration *)
 
 let enumerate_aux f reach =
-  flatten_blocks (basic_blocks f (join_points f))
+  let joins = join_points f in
+  List.flatten (place_latches f joins (sort_blocks (basic_blocks f joins)))

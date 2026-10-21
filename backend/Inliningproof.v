@@ -17,20 +17,21 @@ Require Import AST Linking Values Memory Globalenvs Events Smallstep.
 Require Import Op Registers RTL.
 Require Import Inlining Inliningspec.
 
-Definition match_prog (prog tprog: program) :=
-  match_program (fun cunit f tf => transf_fundef (funenv_program cunit) f = OK tf) eq prog tprog.
+Definition match_prog (round: nat) (prog tprog: program) :=
+  match_program (fun cunit f tf => transf_fundef (funenv_program round cunit) f = OK tf) eq prog tprog.
 
 Lemma transf_program_match:
-  forall prog tprog, transf_program prog = OK tprog -> match_prog prog tprog.
+  forall round prog tprog, transf_program round prog = OK tprog -> match_prog round prog tprog.
 Proof.
   intros. eapply match_transform_partial_program_contextual; eauto.
 Qed.
 
 Section INLINING.
 
+Variable round: nat.
 Variable prog: program.
 Variable tprog: program.
-Hypothesis TRANSF: match_prog prog tprog.
+Hypothesis TRANSF: match_prog round prog tprog.
 Let ge := Genv.globalenv prog.
 Let tge := Genv.globalenv tprog.
 
@@ -45,17 +46,17 @@ Proof. exact (Genv.senv_match TRANSF). Qed.
 Lemma functions_translated:
   forall (v: val) (f: fundef),
   Genv.find_funct ge v = Some f ->
-  exists cu f', Genv.find_funct tge v = Some f' /\ transf_fundef (funenv_program cu) f = OK f' /\ linkorder cu prog.
+  exists cu f', Genv.find_funct tge v = Some f' /\ transf_fundef (funenv_program round cu) f = OK f' /\ linkorder cu prog.
 Proof. exact (Genv.find_funct_match TRANSF). Qed.
 
 Lemma function_ptr_translated:
   forall (b: block) (f: fundef),
   Genv.find_funct_ptr ge b = Some f ->
-  exists cu f', Genv.find_funct_ptr tge b = Some f' /\ transf_fundef (funenv_program cu) f = OK f' /\ linkorder cu prog.
+  exists cu f', Genv.find_funct_ptr tge b = Some f' /\ transf_fundef (funenv_program round cu) f = OK f' /\ linkorder cu prog.
 Proof. exact (Genv.find_funct_ptr_match TRANSF). Qed.
 
 Lemma sig_function_translated:
-  forall cu f f', transf_fundef (funenv_program cu) f = OK f' -> funsig f' = funsig f.
+  forall cu f f', transf_fundef (funenv_program round cu) f = OK f' -> funsig f' = funsig f.
 Proof.
   intros. destruct f; Errors.monadInv H.
   exploit transf_function_spec; eauto. intros SP; inv SP. auto.
@@ -362,7 +363,7 @@ Lemma find_function_agree:
   agree_regs F ctx rs rs' ->
   Genv.inject F ge ->
   exists cu fd',
-  find_function tge (sros ctx ros) rs' = Some fd' /\ transf_fundef (funenv_program cu) fd = OK fd' /\ linkorder cu prog.
+  find_function tge (sros ctx ros) rs' = Some fd' /\ transf_fundef (funenv_program round cu) fd = OK fd' /\ linkorder cu prog.
 Proof.
   intros. destruct ros as [r | id]; simpl in *.
 - (* register *)
@@ -816,7 +817,7 @@ Inductive match_states: RTL.state -> RTL.state -> Prop :=
   | match_call_states: forall stk fd args m stk' fd' args' m' cunit F
         (MS: match_stacks F m m' stk stk' (Mem.nextblock m'))
         (LINK: linkorder cunit prog)
-        (FD: transf_fundef (funenv_program cunit) fd = OK fd')
+        (FD: transf_fundef (funenv_program round cunit) fd = OK fd')
         (VINJ: Val.inject_list F args args')
         (MINJ: Mem.inject F m m'),
       match_states (Callstate stk fd args m)

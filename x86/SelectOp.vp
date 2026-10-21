@@ -272,22 +272,44 @@ Definition same_expr_pure (e1 e2: expr) :=
   | _, _ => false
   end.
 
+(** Recognize left shifts by an immediate amount, including those
+  that [shlimm] turned into [lea] instructions. *)
+
+Definition is_shlimm (e: expr) : option (int * expr) :=
+  match e with
+  | Eop (Oshlimm n) (t:::Enil) => Some (n, t)
+  | Eop (Olea (Ascaled sc ofs)) (t:::Enil) =>
+      if zeq ofs 0 then
+        if zeq sc 2 then Some (Int.repr 1, t)
+        else if zeq sc 4 then Some (Int.repr 2, t)
+        else if zeq sc 8 then Some (Int.repr 3, t)
+        else None
+      else None
+  | _ => None
+  end.
+
+(** [or_shl_shru e1 n2 t2 dflt] is [e1 | (t2 >>u n2)], or [dflt] if
+  this is not a rotate or double-precision shift. *)
+
+Definition or_shl_shru (e1: expr) (n2: int) (t2: expr) (dflt: expr) :=
+  match is_shlimm e1 with
+  | Some (n1, t1) =>
+      if Int.eq (Int.add n1 n2) Int.iwordsize then
+        if same_expr_pure t1 t2
+        then Eop (Ororimm n2) (t1:::Enil)
+        else Eop (Oshldimm n1) (t1:::t2:::Enil)
+      else dflt
+  | None => dflt
+  end.
+
 Nondetfunction or (e1: expr) (e2: expr) :=
   match e1, e2 with
   | Eop (Ointconst n1) Enil, t2 => orimm n1 t2
   | t1, Eop (Ointconst n2) Enil => orimm n2 t1
-  | Eop (Oshlimm n1) (t1:::Enil), Eop (Oshruimm n2) (t2:::Enil) =>
-      if Int.eq (Int.add n1 n2) Int.iwordsize then
-        if same_expr_pure t1 t2
-        then Eop (Ororimm n2) (t1:::Enil)
-        else Eop (Oshldimm n1) (t1:::t2:::Enil)
-      else Eop Oor (e1:::e2:::Enil)
-  | Eop (Oshruimm n2) (t2:::Enil), Eop (Oshlimm n1) (t1:::Enil) =>
-      if Int.eq (Int.add n1 n2) Int.iwordsize then
-        if same_expr_pure t1 t2
-        then Eop (Ororimm n2) (t1:::Enil)
-        else Eop (Oshldimm n1) (t1:::t2:::Enil)
-      else Eop Oor (e1:::e2:::Enil)
+  | t1, Eop (Oshruimm n2) (t2:::Enil) =>
+      or_shl_shru t1 n2 t2 (Eop Oor (e1:::e2:::Enil))
+  | Eop (Oshruimm n2) (t2:::Enil), t1 =>
+      or_shl_shru t1 n2 t2 (Eop Oor (e1:::e2:::Enil))
   | _, _ =>
       Eop Oor (e1:::e2:::Enil)
   end.

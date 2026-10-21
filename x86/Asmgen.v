@@ -47,6 +47,13 @@ Definition mk_mov (rd rs: preg) (k: code) : res code :=
   end.
 
 Definition mk_shrximm (n: int) (k: code) : res code :=
+  if Int.eq n Int.one then
+    (* [x / 2] is [(x + (x >>u 31)) >> 1] *)
+    OK (Pmov_rr RCX RAX ::
+        Pshrl_ri RCX (Int.repr 31) ::
+        Pleal RAX (Addrmode (Some RAX) (Some(RCX, 1)) (inl _ 0)) ::
+        Psarl_ri RAX Int.one :: k)
+  else
   let p := Int.sub (Int.shl Int.one n) Int.one in
   OK (Ptestl_rr RAX RAX ::
       Pleal RCX (Addrmode (Some RAX) None (inl _ (Int.unsigned p))) ::
@@ -468,6 +475,15 @@ Definition transl_op
       do r1 <- ireg_of a1; do r <- ireg_of res; OK (Pmovsl_rr r r1 :: k)
   | Ocast32unsigned, a1 :: nil =>
       do r1 <- ireg_of a1; do r <- ireg_of res; OK (Pmovzl_rr r r1 :: k)
+  | Ozextshlimm n, a1 :: nil =>
+      assertion (mreg_eq a1 res);
+      do r <- ireg_of res; OK (Psallzx_ri r n :: k)
+  | Ozextshruimm n, a1 :: nil =>
+      assertion (mreg_eq a1 res);
+      do r <- ireg_of res; OK (Pshrlzx_ri r n :: k)
+  | Ozextandimm n, a1 :: nil =>
+      assertion (mreg_eq a1 res);
+      do r <- ireg_of res; OK (Pandlzx_ri r n :: k)
   | Onegl, a1 :: nil =>
       assertion (mreg_eq a1 res);
       do r <- ireg_of res; OK (Pnegq r :: k)

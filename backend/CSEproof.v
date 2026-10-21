@@ -600,6 +600,54 @@ Proof.
 - econstructor; eauto using builtin_args_depends_on_memory_correct.
 Qed.
 
+Lemma find_valnum_regs_sound:
+  forall valu ge sp rs m n rl vl,
+  numbering_holds valu ge sp rs m n ->
+  find_valnum_regs n rl = Some vl ->
+  rs##rl = map valu vl.
+Proof.
+  induction rl as [ | r1 rl]; simpl; intros.
+- inv H0; auto.
+- destruct (num_reg n)!r1 as [v1|] eqn:R1; try discriminate.
+  destruct (find_valnum_regs n rl) as [vs|] eqn:RL; inv H0.
+  simpl. f_equal. eapply num_holds_reg; eauto. eauto.
+Qed.
+
+Lemma same_base_disjoint_sound:
+  forall valu ge sp rs m n addr1 vl1 sz1 addr2 vl2 sz2 b1 ofs1 b2 ofs2,
+  numbering_holds valu ge sp rs m n ->
+  same_base_disjoint n addr1 vl1 sz1 addr2 vl2 sz2 = true ->
+  eval_addressing ge sp addr1 (map valu vl1) = Some (Vptr b1 ofs1) ->
+  eval_addressing ge sp addr2 (map valu vl2) = Some (Vptr b2 ofs2) ->
+  b2 = b1 /\ (Ptrofs.unsigned ofs1 + sz1 <= Ptrofs.unsigned ofs2
+              \/ Ptrofs.unsigned ofs2 + sz2 <= Ptrofs.unsigned ofs1).
+Proof.
+  unfold same_base_disjoint; intros.
+  set (get := fun v => find_valnum_num v n.(num_eqs)) in *.
+  assert (GET: forall v rhs, get v = Some rhs -> rhs_eval_to valu ge sp m rhs (valu v)).
+  { unfold get; intros. exploit num_holds_eq; eauto.
+    eapply find_valnum_num_charact; eauto. intros EH; inv EH; auto. }
+  assert (NN: addr_deltas get addr1 vl1 addr2 vl2 <> nil).
+  { red; intros E; rewrite E in H0; discriminate. }
+  assert (FA: forallb (fun delta =>
+                         zle sz1 (Ptrofs.unsigned (Ptrofs.repr delta)) &&
+                         zle (Ptrofs.unsigned (Ptrofs.repr delta)) (Ptrofs.modulus - sz2))
+                      (addr_deltas get addr1 vl1 addr2 vl2) = true).
+  { destruct (addr_deltas get addr1 vl1 addr2 vl2); congruence. }
+  exploit (addr_deltas_sound ge sp m get valu GET addr1 vl1 addr2 vl2); eauto.
+  intros (delta & IN & EQ). inv EQ.
+  rewrite forallb_forall in FA. specialize (FA delta IN). InvBooleans.
+  split; auto.
+  set (d := Ptrofs.unsigned (Ptrofs.repr delta)) in *.
+  assert (U1 := Ptrofs.unsigned_range ofs1).
+  assert (D: 0 <= d < Ptrofs.modulus) by apply Ptrofs.unsigned_range.
+  rewrite Ptrofs.add_unsigned, Ptrofs.unsigned_repr_eq. fold d.
+  destruct (zlt (Ptrofs.unsigned ofs1 + d) Ptrofs.modulus).
+- left. rewrite Z.mod_small by lia. lia.
+- right. rewrite <- (Z.mod_unique (Ptrofs.unsigned ofs1 + d) Ptrofs.modulus 1 (Ptrofs.unsigned ofs1 + d - Ptrofs.modulus)) by lia.
+  lia.
+Qed.
+
 Lemma kill_loads_after_store_holds:
   forall valu ge sp rs m n addr args a chunk v m' bc approx ae am,
   numbering_holds valu ge (Vptr sp Ptrofs.zero) rs m n ->
@@ -613,18 +661,26 @@ Lemma kill_loads_after_store_holds:
                            (kill_loads_after_store approx n chunk addr args).
 Proof.
   intros. apply kill_equations_hold with m; auto.
-  intros. unfold filter_after_store in H6; inv H8.
+  intros. unfold filter_after_store_addr in H6; inv H8.
 - constructor. rewrite <- H9. apply op_depends_on_memory_correct; auto.
 - econstructor; eauto. rewrite <- H10.
   destruct a; try discriminate.
   destruct a0; try discriminate.
   simpl. destruct zle; auto.
-  rewrite negb_false_iff in H6. unfold aaddressing in H6.
+  rewrite negb_false_iff, orb_true_iff in H6. destruct H6 as [H6|H6].
++ unfold aaddressing in H6.
   inv H7. rewrite H9 in H14; inv H14.
   eapply Mem.load_store_other. eauto with mem.
   eapply pdisjoint_sound_strong with (bc1 := bc0) (bc2 := bc); eauto.
   apply match_aptr_of_aval. eapply eval_static_addressing_sound; eauto.
   eauto with va.
++ destruct (same_base_valnums n addr args (size_chunk chunk)) as [vl0|] eqn:SB; [|discriminate].
+  assert (FV: find_valnum_regs n args = Some vl0).
+  { unfold same_base_valnums in SB. destruct (find_valnum_regs n args); [|discriminate].
+    destruct (Nat.leb _ _); congruence. }
+  erewrite find_valnum_regs_sound in H0 by eauto.
+  exploit same_base_disjoint_sound; eauto. intros [A B]. subst b0.
+  eapply Mem.load_store_other. eauto with mem. right; tauto.
 - econstructor; eauto using builtin_args_depends_on_memory_correct.
 Qed.
 

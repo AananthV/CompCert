@@ -167,6 +167,73 @@ Function combine_op (op: operation) (args: list valnum) : option(operation * lis
   | _, _ => None
   end.
 
+(** Recognition of addresses that differ by a constant offset.
+  [addr_deltas addr1 vl1 addr2 vl2] returns a list of integers [d]
+  such that the address denoted by [addr2] and [vl2] is the address
+  denoted by [addr1] and [vl1], plus one of the [d].  This is used by CSE to
+  show that a store does not invalidate a load from a nearby address.
+  Two cases are recognized:
+- identical arguments, and addressing modes that differ only by their offsets;
+- [b + (long)(x + c1) * sc + o1] and [b + (long)(x + c2) * sc + o2],
+  where the 32-bit additions [x + c1] and [x + c2] can overflow,
+  hence two possible values for [d]. *)
+
+Definition addressing_delta (addr1 addr2: addressing) : option Z :=
+  let delta :=
+    match addr1, addr2 with
+    | Aindexed n1, Aindexed n2 => n2 - n1
+    | Aindexed2 n1, Aindexed2 n2 => n2 - n1
+    | Ascaled _ n1, Ascaled _ n2 => n2 - n1
+    | Aindexed2scaled _ n1, Aindexed2scaled _ n2 => n2 - n1
+    | Aglobal _ n1, Aglobal _ n2 => Ptrofs.unsigned (Ptrofs.sub n2 n1)
+    | Abased _ n1, Abased _ n2 => Ptrofs.unsigned (Ptrofs.sub n2 n1)
+    | Abasedscaled _ _ n1, Abasedscaled _ _ n2 => Ptrofs.unsigned (Ptrofs.sub n2 n1)
+    | Ainstack n1, Ainstack n2 => Ptrofs.unsigned (Ptrofs.sub n2 n1)
+    | _, _ => 0
+    end in
+  if eq_addressing (offset_addressing_total addr1 delta) addr2
+  then Some delta else None.
+
+Definition index_offset (k: valnum) : valnum * Z :=
+  match get k with
+  | Some(Op (Olea (Aindexed c)) (x :: nil)) => (x, c)
+  | _ => (k, 0)
+  end.
+
+Definition index_form (i: valnum) : option (bool * valnum * Z) :=
+  match get i with
+  | Some(Op Ocast32signed (k :: nil)) =>
+      let (x, c) := index_offset k in Some (true, x, c)
+  | Some(Op Ocast32unsigned (k :: nil)) =>
+      let (x, c) := index_offset k in Some (false, x, c)
+  | _ => None
+  end.
+
+Definition index_deltas (sc: Z) (i1 i2: valnum) (d: Z) : list Z :=
+  match index_form i1, index_form i2 with
+  | Some (s1, x1, c1), Some (s2, x2, c2) =>
+      if Bool.eqb s1 s2 && peq x1 x2 then
+        let r := (c2 - c1) mod Int.modulus in
+        (d + sc * r) :: (d + sc * (r - Int.modulus)) :: nil
+      else nil
+  | _, _ => nil
+  end.
+
+Definition addr_deltas (addr1: addressing) (vl1: list valnum)
+                       (addr2: addressing) (vl2: list valnum) : list Z :=
+  if list_eq_dec peq vl1 vl2 then
+    match addressing_delta addr1 addr2 with
+    | Some d => d :: nil
+    | None => nil
+    end
+  else if Archi.ptr64 then
+    match addr1, addr2, vl1, vl2 with
+    | Aindexed2 o1, Aindexed2 o2, b1 :: i1 :: nil, b2 :: i2 :: nil =>
+        if peq b1 b2 then index_deltas 1 i1 i2 (o2 - o1) else nil
+    | Aindexed2scaled sc1 o1, Aindexed2scaled sc2 o2, b1 :: i1 :: nil, b2 :: i2 :: nil =>
+        if zeq sc1 sc2 && peq b1 b2 then index_deltas sc1 i1 i2 (o2 - o1) else nil
+    | _, _, _, _ => nil
+    end
+  else nil.
+
 End COMBINE.
-
-

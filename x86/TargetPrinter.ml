@@ -540,25 +540,34 @@ module Target(System: SYSTEM):TARGET =
           fprintf oc "	movslq	%a, %a\n" ireg32 r1 ireg64 rd
       | Pmovls_rr(rd) ->
           ()   (* nothing to do *)
+      (* The conversions to floats below only write the low part of [rd]
+         and therefore depend on its previous value.  We break this
+         false dependency by clearing [rd] first. *)
       | Pcvtsd2ss_ff(rd, r1) ->
+          if rd <> r1 then fprintf oc "	xorps	%a, %a\n" freg rd freg rd;
           fprintf oc "	cvtsd2ss %a, %a\n" freg r1 freg rd
       | Pcvtss2sd_ff(rd, r1) ->
+          if rd <> r1 then fprintf oc "	xorpd	%a, %a\n" freg rd freg rd;
           fprintf oc "	cvtss2sd %a, %a\n" freg r1 freg rd
       | Pcvttsd2si_rf(rd, r1) ->
           fprintf oc "	cvttsd2si %a, %a\n" freg r1 ireg32 rd
       | Pcvtsi2sd_fr(rd, r1) ->
+          fprintf oc "	xorpd	%a, %a\n" freg rd freg rd;
           fprintf oc "	cvtsi2sd %a, %a\n" ireg32 r1 freg rd
       | Pcvttss2si_rf(rd, r1) ->
           fprintf oc "	cvttss2si %a, %a\n" freg r1 ireg32 rd
       | Pcvtsi2ss_fr(rd, r1) ->
+          fprintf oc "	xorps	%a, %a\n" freg rd freg rd;
           fprintf oc "	cvtsi2ss %a, %a\n" ireg32 r1 freg rd
       | Pcvttsd2sl_rf(rd, r1) ->
           fprintf oc "	cvttsd2si %a, %a\n" freg r1 ireg64 rd
       | Pcvtsl2sd_fr(rd, r1) ->
+          fprintf oc "	xorpd	%a, %a\n" freg rd freg rd;
           fprintf oc "	cvtsi2sdq %a, %a\n" ireg64 r1 freg rd
       | Pcvttss2sl_rf(rd, r1) ->
           fprintf oc "	cvttss2si %a, %a\n" freg r1 ireg64 rd
       | Pcvtsl2ss_fr(rd, r1) ->
+          fprintf oc "	xorps	%a, %a\n" freg rd freg rd;
           fprintf oc "	cvtsi2ssq %a, %a\n" ireg64 r1 freg rd
             (* Arithmetic and logical operations over integers *)
       | Pleal(rd, a) ->
@@ -663,6 +672,13 @@ module Target(System: SYSTEM):TARGET =
           fprintf oc "	sarq	$%a, %a\n" coqint n ireg64 rd
       | Pshld_ri(rd, r1, n) ->
           fprintf oc "	shldl	$%a, %a, %a\n" coqint n ireg32 r1 ireg32 rd
+      (* 32-bit operations set the high 32 bits of the destination to zero *)
+      | Psallzx_ri(rd, n) ->
+          fprintf oc "	sall	$%a, %a\n" coqint n ireg32 rd
+      | Pshrlzx_ri(rd, n) ->
+          fprintf oc "	shrl	$%a, %a\n" coqint n ireg32 rd
+      | Pandlzx_ri(rd, n) ->
+          fprintf oc "	andl	$%a, %a\n" coqint n ireg32 rd
       | Prorl_ri(rd, n) ->
           fprintf oc "	rorl	$%a, %a\n" coqint n ireg32 rd
       | Prorq_ri(rd, n) ->

@@ -201,7 +201,41 @@ Lemma mk_shrximm_correct:
   /\ rs2#RAX = v
   /\ forall r, data_preg r = true -> r <> RAX -> r <> RCX -> rs2#r = rs1#r.
 Proof.
-  unfold mk_shrximm; intros. inv H.
+  intros until m; intros TR SHRX. unfold mk_shrximm in TR.
+  predSpec Int.eq Int.eq_spec n Int.one.
+- (* n = 1 *)
+  subst n. inv TR. exploit Val.shrx_shr_2; eauto. rewrite Int.eq_false by discriminate.
+  change (Int.sub (Int.repr 32) Int.one) with (Int.repr 31). intros EQ.
+  assert (SH: Val.shru (Val.shr (rs1 RAX) (Vint (Int.repr 31))) (Vint (Int.repr 31))
+              = Val.shru (rs1 RAX) (Vint (Int.repr 31))).
+  { assert (L: Int.ltu (Int.repr 31) Int.iwordsize = true) by reflexivity.
+    destruct (rs1 RAX); auto. simpl. rewrite L. simpl. rewrite L.
+    f_equal. apply Int.same_bits_eq; intros j J.
+    rewrite ! Int.bits_shru by auto. change (Int.unsigned (Int.repr 31)) with 31.
+    destruct (zlt (j + 31) Int.zwordsize); auto.
+    rewrite Int.bits_shr by lia. change (Int.unsigned (Int.repr 31)) with 31.
+    rewrite zlt_false. f_equal. change Int.zwordsize with 32 in *; lia.
+    change Int.zwordsize with 32 in *; lia. }
+  rewrite SH in EQ. clear SH.
+  set (v1 := Val.shru (rs1 RAX) (Vint (Int.repr 31))) in *.
+  set (rs2 := nextinstr (rs1#RCX <- (rs1 RAX))).
+  set (rs3 := nextinstr_nf (rs2#RCX <- v1)).
+  set (rs4 := nextinstr (rs3#RAX <- (Val.add (rs1 RAX) v1))).
+  set (rs5 := nextinstr_nf (rs4#RAX <- v)).
+  assert (X: forall v1 v2,
+             Val.add v1 (Val.add v2 (Vint (Int.repr 0))) = Val.add v1 v2).
+  { intros. unfold Val.add; destruct Archi.ptr64 eqn:SF, v0; auto; destruct v2; auto;
+    rewrite ? Int.add_zero; rewrite ? Ptrofs.add_zero; auto. }
+  exists rs5; split.
+  eapply exec_straight_trans with (rs2 := rs3).
+  eapply exec_straight_two with (rs2 := rs2); reflexivity.
+  eapply exec_straight_two with (rs2 := rs4).
+  simpl. rewrite X. reflexivity.
+  simpl. unfold rs5. rewrite EQ. reflexivity. reflexivity. reflexivity.
+  split. unfold rs5; Simplifs.
+  intros. unfold rs5; Simplifs. unfold rs4; Simplifs. unfold rs3; Simplifs. unfold rs2; Simplifs.
+- (* general case *)
+  rewrite Int.eq_false in TR by auto. clear H. inv TR. rename SHRX into H0.
   exploit Val.shrx_shr; eauto. intros [x [y [A [B C]]]].
   inversion B; clear B; subst y; subst v; clear H0.
   set (tnm1 := Int.sub (Int.shl Int.one n) Int.one).

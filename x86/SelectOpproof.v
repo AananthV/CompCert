@@ -432,37 +432,73 @@ Proof.
   intros. subst z. rewrite Int.sub_add_l. rewrite Int.sub_idem. apply Int.add_zero_l.
 Qed.
 
+Lemma is_shlimm_sound:
+  forall le a n t v,
+  is_shlimm a = Some (n, t) ->
+  eval_expr ge sp e m le a v ->
+  exists v1, eval_expr ge sp e m le t v1 /\ v = Val.shl v1 (Vint n).
+Proof.
+  unfold is_shlimm; intros.
+  assert (SC: forall v1 sc k,
+              Int.shl Int.one (Int.repr k) = Int.repr sc -> 0 <= k < 32 ->
+              Val.add (Val.mul v1 (Vint (Int.repr sc))) (Vint (Int.repr 0)) =
+              Val.shl v1 (Vint (Int.repr k))).
+  { intros. destruct v1; simpl; auto.
+    replace (Int.ltu (Int.repr k) Int.iwordsize) with true.
+    rewrite Int.add_zero. rewrite <- H1. rewrite <- Int.shl_mul. auto.
+    unfold Int.ltu. change (Int.unsigned Int.iwordsize) with 32.
+    rewrite Int.unsigned_repr by (unfold Int.max_unsigned; simpl; lia).
+    rewrite zlt_true by lia. auto. }
+  destruct a; try discriminate. destruct o; try discriminate.
+- destruct e0; try discriminate. destruct e1; try discriminate.
+  inv H. InvEval. exists v1; auto.
+- destruct a; try discriminate.
+  destruct e0; try discriminate. destruct e1; try discriminate.
+  destruct (zeq z0 0); try discriminate. subst z0.
+  InvEval.
+  destruct (zeq z 2). subst z. inv H. exists v1; split; auto. apply SC; auto. lia.
+  destruct (zeq z 4). subst z. inv H. exists v1; split; auto. apply SC; auto. lia.
+  destruct (zeq z 8). subst z. inv H. exists v1; split; auto. apply SC; auto. lia.
+  discriminate.
+Qed.
+
+Lemma eval_or_shl_shru:
+  forall le a n2 t2 dflt x y,
+  eval_expr ge sp e m le a x ->
+  eval_expr ge sp e m le t2 y ->
+  (exists v, eval_expr ge sp e m le dflt v /\ Val.lessdef (Val.or x (Val.shru y (Vint n2))) v) ->
+  exists v, eval_expr ge sp e m le (or_shl_shru a n2 t2 dflt) v
+         /\ Val.lessdef (Val.or x (Val.shru y (Vint n2))) v.
+Proof.
+  intros until y; intros EA ET DFLT. unfold or_shl_shru.
+  destruct (is_shlimm a) as [[n1 t1]|] eqn:SH; auto.
+  exploit is_shlimm_sound; eauto. intros (v1 & EV1 & EQ). subst x.
+  predSpec Int.eq Int.eq_spec (Int.add n1 n2) Int.iwordsize; auto.
+  destruct (same_expr_pure t1 t2) eqn:?.
+- exploit eval_same_expr; eauto. intros [EQ1 EQ2]; subst.
+  exists (Val.ror y (Vint n2)); split. EvalOp.
+  destruct y; simpl; auto.
+  destruct (Int.ltu n1 Int.iwordsize) eqn:?; auto.
+  destruct (Int.ltu n2 Int.iwordsize) eqn:?; auto.
+  simpl. rewrite <- Int.or_ror; auto.
+- econstructor; split. EvalOp.
+  simpl. erewrite int_add_sub_eq; eauto. auto.
+Qed.
+
 Lemma eval_or: binary_constructor_sound or Val.or.
 Proof.
   red; intros until y; unfold or; case (or_match a b); intros.
   (* intconst *)
 - InvEval. rewrite Val.or_commut. apply eval_orimm; auto.
 - InvEval. apply eval_orimm; auto.
-- (* shlimm - shruimm *)
-  predSpec Int.eq Int.eq_spec (Int.add n1 n2) Int.iwordsize.
-  destruct (same_expr_pure t1 t2) eqn:?.
-  InvEval. exploit eval_same_expr; eauto. intros [EQ1 EQ2]; subst.
-  exists (Val.ror v0 (Vint n2)); split. EvalOp.
-  destruct v0; simpl; auto.
-  destruct (Int.ltu n1 Int.iwordsize) eqn:?; auto.
-  destruct (Int.ltu n2 Int.iwordsize) eqn:?; auto.
-  simpl. rewrite <- Int.or_ror; auto.
-  InvEval. econstructor; split; eauto. EvalOp.
-  simpl. erewrite int_add_sub_eq; eauto.
-  TrivialExists.
-- (* shruimm - shlimm *)
-  predSpec Int.eq Int.eq_spec (Int.add n1 n2) Int.iwordsize.
-  destruct (same_expr_pure t1 t2) eqn:?.
-  InvEval. exploit eval_same_expr; eauto. intros [EQ1 EQ2]; subst.
-  exists (Val.ror v1 (Vint n2)); split. EvalOp.
-  destruct v1; simpl; auto.
-  destruct (Int.ltu n2 Int.iwordsize) eqn:?; auto.
-  destruct (Int.ltu n1 Int.iwordsize) eqn:?; auto.
-  simpl. rewrite Int.or_commut. rewrite <- Int.or_ror; auto.
-  InvEval. econstructor; split; eauto. EvalOp.
-  simpl. erewrite int_add_sub_eq; eauto.
-  rewrite Val.or_commut; auto.
-  TrivialExists.
+- (* _ - shruimm *)
+  assert (DEFAULT: exists v, eval_expr ge sp e m le (Eop Oor (t1:::Eop (Oshruimm n2) (t2:::Enil):::Enil)) v
+                          /\ Val.lessdef (Val.or x y) v) by TrivialExists.
+  InvEval. apply eval_or_shl_shru; auto.
+- (* shruimm - _ *)
+  assert (DEFAULT: exists v, eval_expr ge sp e m le (Eop Oor (Eop (Oshruimm n2) (t2:::Enil):::t1:::Enil)) v
+                          /\ Val.lessdef (Val.or x y) v) by TrivialExists.
+  InvEval. rewrite Val.or_commut in *. apply eval_or_shl_shru; auto.
 - (* default *)
   TrivialExists.
 Qed.

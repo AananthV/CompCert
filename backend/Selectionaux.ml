@@ -115,9 +115,28 @@ from the other branch in parallel with instructions from the first
 branch.
 *)
 
-let cost_criterion ifso ifnot =
+(*
+A special case is the "conditional update" [if (c) x = e;], where one
+of the arms is [x] itself.  Without if-conversion, the path where [c]
+is false costs nothing and, if the branch is well predicted, the
+computation of [e] is not on the critical path for the next uses of
+[x].  With if-conversion, the next value of [x] depends on both [c]
+and [e].  This is especially harmful when [x] is loop-carried, as in
+[if (arg) pc += offset;] in the main loop of a bytecode interpreter,
+where subsequent loads through [pc] must wait for the conditional
+move.  Hence, for conditional updates, we only if-convert if [e] is
+very cheap, as in [if (x < y) x = y;] (max) or [if (c) x = x + 1;].
+*)
+
+let is_var id = function
+  | Evar id' -> id' = id
+  | _ -> false
+
+let cost_criterion id ifso ifnot =
   let c1 = cost_expr ifso and c2 = cost_expr ifnot in
-  c1 + c2 <= 24 && abs (c1 - c2) <= 8
+  if is_var id ifso || is_var id ifnot
+  then c1 + c2 <= 3
+  else c1 + c2 <= 24 && abs (c1 - c2) <= 8
 
 (*
 Intuition for the later optimization that should not be prevented:
@@ -177,5 +196,5 @@ let if_conversion_heuristic id cond ifso ifnot ty kont =
   if not !Clflags.option_fifconversion then false else
   if !Clflags.option_Obranchless then true else
   if not (fast_cmove ty) then false else
-  cost_criterion ifso ifnot && optimization_criterion id ifso ifnot kont
+  cost_criterion id ifso ifnot && optimization_criterion id ifso ifnot kont
 

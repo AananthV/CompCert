@@ -158,4 +158,12 @@ Function combine_op (op: operation) (args: list valnum) : option(operation * lis
 
 End COMBINE.
 
+(** Recognition of addresses that differ by a constant offset.
+  [addr_deltas get addr1 vl1 addr2 vl2] returns a list of integers [d]
+  such that the address denoted by [addr2] and [vl2] is the address
+  denoted by [addr1] and [vl1], plus one of the [d].
+  Not implemented for this architecture. *)
 
+Definition addr_deltas (get: valnum -> option rhs)
+                       (addr1: addressing) (vl1: list valnum)
+                       (addr2: addressing) (vl2: list valnum) : list Z := nil.

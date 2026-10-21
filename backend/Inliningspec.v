@@ -27,7 +27,7 @@ Definition fenv_compat (p: program) (fenv: funenv) : Prop :=
   fenv!id = Some f -> (prog_defmap p)!id = Some (Gfun (Internal f)).
 
 Lemma funenv_program_compat:
-  forall p, fenv_compat p (funenv_program p).
+  forall round p, fenv_compat p (funenv_program round p).
 Proof.
   set (P := fun (dm: PTree.t (globdef fundef unit)) (fenv: funenv) =>
               forall id f,
@@ -699,12 +699,12 @@ Proof.
 Qed.
 
 Lemma transf_function_spec:
-  forall cunit f f',
-  transf_function (funenv_program cunit) f = OK f' ->
+  forall round cunit f f',
+  transf_function (funenv_program round cunit) f = OK f' ->
   tr_function cunit f f'.
 Proof.
   intros. unfold transf_function in H.
-  set (fenv := funenv_program cunit) in *.
+  set (fenv := funenv_program round cunit) in *.
   destruct (expand_function fenv f initstate) as [ctx s i] eqn:?.
   destruct (zlt (st_stksize s) Ptrofs.max_unsigned); inv H.
   monadInv Heqr. set (ctx := initcontext x x0 (max_reg_function f) (fn_stacksize f)) in *.

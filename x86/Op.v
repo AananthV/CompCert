@@ -115,6 +115,9 @@ Inductive operation : Type :=
   | Ohighlong                (**r [rd = high-word(r1)] *)
   | Ocast32signed            (**r [rd] is 32-bit sign extension of [r1] *)
   | Ocast32unsigned          (**r [rd] is 32-bit zero extension of [r1] *)
+  | Ozextshlimm (n: int)     (**r [rd] is 32-bit zero extension of [r1 << n] *)
+  | Ozextshruimm (n: int)    (**r [rd] is 32-bit zero extension of [r1 >> n] (unsigned) *)
+  | Ozextandimm (n: int)     (**r [rd] is 32-bit zero extension of [r1 & n] *)
   | Onegl                    (**r [rd = - r1] *)
   | Oaddlimm (n: int64)      (**r [rd = r1 + n] *)
   | Osubl                    (**r [rd = r1 - r2] *)
@@ -387,6 +390,9 @@ Definition eval_operation
   | Ohighlong, v1::nil => Some(Val.hiword v1)
   | Ocast32signed, v1 :: nil => Some (Val.longofint v1)
   | Ocast32unsigned, v1 :: nil => Some (Val.longofintu v1)
+  | Ozextshlimm n, v1 :: nil => Some (Val.longofintu (Val.shl v1 (Vint n)))
+  | Ozextshruimm n, v1 :: nil => Some (Val.longofintu (Val.shru v1 (Vint n)))
+  | Ozextandimm n, v1 :: nil => Some (Val.longofintu (Val.and v1 (Vint n)))
   | Onegl, v1::nil => Some (Val.negl v1)
   | Oaddlimm n, v1::nil => Some (Val.addl v1 (Vlong n))
   | Osubl, v1::v2::nil => Some (Val.subl v1 v2)
@@ -561,6 +567,9 @@ Definition type_of_operation (op: operation) : list typ * typ :=
   | Ohighlong => (Tlong :: nil, Tint)
   | Ocast32signed => (Tint :: nil, Tlong)
   | Ocast32unsigned => (Tint :: nil, Tlong)
+  | Ozextshlimm _ => (Tint :: nil, Tlong)
+  | Ozextshruimm _ => (Tint :: nil, Tlong)
+  | Ozextandimm _ => (Tint :: nil, Tlong)
   | Onegl => (Tlong :: nil, Tlong)
   | Oaddlimm _ => (Tlong :: nil, Tlong)
   | Osubl => (Tlong :: Tlong :: nil, Tlong)
@@ -718,6 +727,9 @@ Proof with (try exact I; try reflexivity).
   destruct v0...
   destruct v0...
   destruct v0...
+  destruct v0...
+  destruct v0; simpl... destruct (Int.ltu n Int.iwordsize)...
+  destruct v0; simpl... destruct (Int.ltu n Int.iwordsize)...
   destruct v0...
   destruct v0...
   unfold Val.addl, Val.has_type; destruct Archi.ptr64, v0...
@@ -1286,6 +1298,9 @@ Proof.
   inv H4; simpl; auto.
   inv H4; simpl; auto.
   inv H4; simpl; auto.
+  inv H4; simpl; auto.
+  inv H4; simpl; auto. destruct (Int.ltu n Int.iwordsize); simpl; auto.
+  inv H4; simpl; auto. destruct (Int.ltu n Int.iwordsize); simpl; auto.
   inv H4; simpl; auto.
   inv H4; simpl; auto.
   apply Val.addl_inject; auto.

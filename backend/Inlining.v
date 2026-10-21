@@ -29,7 +29,12 @@ Definition size_fenv (fenv: funenv) := PTree_Properties.cardinal fenv.
 
 Parameter inlining_info: Type.  (* abstract type, implemented on the Caml side *)
 
-Parameter inlining_analysis: program -> inlining_info.
+(** Inlining can be performed several times during compilation.
+  The analysis is given the number of the current inlining round,
+  so that the heuristic can take into account inlining performed in
+  earlier rounds. *)
+
+Parameter inlining_analysis: nat -> program -> inlining_info.
 
 Parameter should_inline: inlining_info -> ident -> function -> bool.
 
@@ -43,8 +48,8 @@ Definition add_globdef (io: inlining_info) (fenv: funenv) (idg: ident * globdef 
       PTree.remove id fenv
   end.
 
-Definition funenv_program (p: program) : funenv :=
-  let io := inlining_analysis p in
+Definition funenv_program (round: nat) (p: program) : funenv :=
+  let io := inlining_analysis round p in
   List.fold_left (add_globdef io) p.(prog_defs) (PTree.empty function).
 
 (** State monad *)
@@ -459,7 +464,7 @@ Definition transf_function (fenv: funenv) (f: function) : Errors.res function :=
 Definition transf_fundef (fenv: funenv) (fd: fundef) : Errors.res fundef :=
   AST.transf_partial_fundef (transf_function fenv) fd.
 
-Definition transf_program (p: program): Errors.res program :=
-  let fenv := funenv_program p in
+Definition transf_program (round: nat) (p: program): Errors.res program :=
+  let fenv := funenv_program round p in
   AST.transform_partial_program (transf_fundef fenv) p.
 

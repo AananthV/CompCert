@@ -415,6 +415,9 @@ let expand_builtin_inline name args res =
      emit (Plabel lbl2)
   (* Float arithmetic *)
   | ("__builtin_fsqrt" | "__builtin_sqrt"), [BA(FR a1)], BR(FR res) ->
+     (* [sqrtsd] only writes the low 64 bits of [res] and therefore
+        depends on its previous value.  Break this false dependency. *)
+     if res <> a1 then emit (Pxorpd_f res);
      emit (Psqrtsd (res,a1))
   | "__builtin_fmadd",  _, _ ->
       expand_fma args res

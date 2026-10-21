@@ -14,6 +14,6 @@
 
 type inlining_info
 
-val inlining_analysis: RTL.program -> inlining_info
+val inlining_analysis: Datatypes.nat -> RTL.program -> inlining_info
 
 val should_inline: inlining_info -> AST.ident -> RTL.coq_function -> bool

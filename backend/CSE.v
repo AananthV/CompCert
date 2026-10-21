@@ -313,11 +313,83 @@ Definition filter_after_store (n: numbering) (p: aptr) (sz: Z) (r: rhs) :=
       builtin_args_depends_on_memory args
   end.
 
+(** In addition to the disjointness of abstract pointers, a load is
+  known to be unaffected by a store if the load address is the store
+  address plus a constant [delta] (as determined by the processor-dependent
+  function [addr_deltas], using the value numbers of the arguments and
+  the equations of the numbering), and the byte ranges accessed are
+  disjoint modulo the size of the address space.  [addr_deltas] can
+  return several possible values for [delta]; all must be disjoint. *)
+
+Fixpoint find_valnum_regs (n: numbering) (rl: list reg) : option (list valnum) :=
+  match rl with
+  | nil => Some nil
+  | r1 :: rs =>
+      match n.(num_reg)!r1, find_valnum_regs n rs with
+      | Some v1, Some vs => Some (v1 :: vs)
+      | _, _ => None
+      end
+  end.
+
+Definition same_base_disjoint (n: numbering)
+                              (addr1: addressing) (vl1: list valnum) (sz1: Z)
+                              (addr2: addressing) (vl2: list valnum) (sz2: Z) : bool :=
+  match addr_deltas (fun v => find_valnum_num v n.(num_eqs)) addr1 vl1 addr2 vl2 with
+  | nil => false
+  | ds =>
+      forallb (fun delta =>
+                 let d := Ptrofs.unsigned (Ptrofs.repr delta) in
+                 zle sz1 d && zle d (Ptrofs.modulus - sz2)) ds
+  end.
+
+Definition filter_after_store_addr (n: numbering) (p: aptr) (sz: Z)
+                                   (addr: addressing) (ovl: option (list valnum))
+                                   (r: rhs) :=
+  match r with
+  | Op op vl =>
+      op_depends_on_memory op
+  | Load chunk addr' vl q =>
+      negb (pdisjoint q (size_chunk chunk) p sz
+            || match ovl with
+               | Some vl0 => same_base_disjoint n addr vl0 sz addr' vl (size_chunk chunk)
+               | None => false
+               end)
+  | Builtin bf args =>
+      builtin_args_depends_on_memory args
+  end.
+
+(** Preserving many loads across stores increases register pressure and
+  can cause spilling, as in [x = a[0] ^ ... ^ a[4]; a[0] ^= x; ...; a[4] ^= x]
+  where all loads would remain available after the first store.
+  As a heuristic, the additional syntactic disjointness check is used only
+  if it preserves at most [max_same_base_loads] load equations. *)
+
+Definition max_same_base_loads : nat := 8%nat.
+
+Definition count_same_base_loads (n: numbering)
+                                 (addr: addressing) (vl0: list valnum) (sz: Z)
+                                 (eqs: list equation) : nat :=
+  List.length (List.filter (fun e => match e with
+                                     | Eq _ _ (Load chunk addr' vl _) =>
+                                         same_base_disjoint n addr vl0 sz addr' vl (size_chunk chunk)
+                                     | _ => false
+                                     end) eqs).
+
+Definition same_base_valnums (n: numbering) (addr: addressing) (args: list reg) (sz: Z)
+                             : option (list valnum) :=
+  match find_valnum_regs n args with
+  | Some vl0 =>
+      if Nat.leb (count_same_base_loads n addr vl0 sz n.(num_eqs)) max_same_base_loads
+      then Some vl0 else None
+  | None => None
+  end.
+
 Definition kill_loads_after_store
              (app: VA.t) (n: numbering)
              (chunk: memory_chunk) (addr: addressing) (args: list reg) :=
   let p := aaddressing app addr args in
-  kill_equations (filter_after_store n p (size_chunk chunk)) n.
+  let sz := size_chunk chunk in
+  kill_equations (filter_after_store_addr n p sz addr (same_base_valnums n addr args sz)) n.
 
 (** [kill_cheap_computations n] removes all equations corresponding to
     ``cheap'' computations, i.e. computations that are not worth
