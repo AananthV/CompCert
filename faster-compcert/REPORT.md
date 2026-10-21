@@ -576,7 +576,7 @@ Every faster-compcert heuristic was tuned on `test/c`. To see how well the resul
 - **`big`:** the larger programs of the CompCert test suite: `raytracer`, `spass`, and the three `compression` programs, each checked against a reference result.
 - **`polybench`:** the 30 PolyBench/C 4.2.1 kernels, at a dataset size chosen per kernel. Results are checked by dumping the arrays at MEDIUM size and comparing against gcc -O0.
 
-Both run with `harness/bench.py --suite big|polybench`, minimum of 3 runs, in seconds. Raw data: `results/heldout-*.json`.
+Both run with `harness/bench.py --suite big|polybench`, minimum of 3 runs, in seconds. Raw data: `results/round1/heldout-*.json`.
 
 | suite (geomean vs CompCert 3.18) | faster-compcert | gcc -O1 | gcc -O2 (CompCert model) | share of the gap to gcc-O2-ccmodel closed |
 |---|---:|---:|---:|---:|
@@ -689,3 +689,99 @@ Both run with `harness/bench.py --suite big|polybench`, minimum of 3 runs, in se
 
    These are heuristic problems to fix under #7 / #16, not retuned here.
 4. **What this means for the roadmap.** The next items should be chosen by their effect on held-out code, not on `test/c`. Address arithmetic in loop nests (#16, #4) dominates PolyBench. fib-specific work (#8) matters least.
+
+---
+
+## 8. Round 2: LICM of dependent chains (issue #16)
+
+§7 showed that loop nests over 2-D arrays recompute their row base
+addresses (`movslq i; imulq $ROW; leaq base`) on every inner iteration. The
+LICM oracle now finds invariant operations as a fixpoint: an operation can
+depend on other hoisted operations, or on copies of registers defined outside
+the loop. Each chain is hoisted, in dependency order, to the outermost loop
+where all of it is invariant.
+
+The validator was extended in two ways, and the proof covers both:
+- a hoisted operation may use hoisted registers defined earlier in the same
+  preheader;
+- a replaced instruction may use registers that are only *equal* to the
+  hoisted arguments. These equations are produced by the oracle, and the
+  validator checks that they form an inductive invariant of the transformed
+  code.
+
+Separately, loop rotation no longer copies loads into the rotated header,
+which fixes the lzss regression from §7.
+
+Cost of the change:
+- 9 files, about 850 lines added.
+- No trusted-base files touched.
+- `Print Assumptions` unchanged.
+- Proofs check on all six targets.
+- 154 regression tests pass.
+- Compile time on `test/c` is unchanged (1.80 s vs 1.82 s).
+
+### Results
+
+The same-session comparison against the previous master gives:
+- PolyBench: **0.912×**;
+- big programs: 0.986×;
+- `test/c`: 1.001× (no program moves more than 2%).
+
+Times in seconds:
+
+| kernel | before #16 | after #16 | change | gcc -O1 |
+|---|---:|---:|---:|---:|
+| gemm | 1.959 | 1.408 | -28% | 0.952 |
+| syrk | 1.359 | 0.986 | -27% | 0.775 |
+| floyd-warshall | 0.226 | 0.168 | -26% | 0.097 |
+| jacobi-2d | 3.800 | 2.958 | -22% | 2.157 |
+| 2mm | 2.930 | 2.583 | -12% | 5.186 |
+| fdtd-2d | 3.142 | 2.442 | -22% | 1.937 |
+| lu | 0.155 | 0.135 | -13% | 0.121 |
+| heat-3d | 0.059 | 0.051 | -13% | 0.030 |
+| ludcmp | 0.124 | 0.103 | -17% | 0.088 |
+| cholesky | 0.122 | 0.103 | -16% | 0.090 |
+| gramschmidt | 5.652 | 5.804 | +3% | 5.957 |
+
+gemm's inner loop goes from 21 to 13 instructions; gcc -O1 has 8.
+```asm
+.L114:  movslq  %r9d, %rsi
+        movq    %r11, %r15              # uncoalesced copy
+        movq    %rsi, %rdi              # uncoalesced copy
+        movsd   0(%r15,%rdi,8), %xmm4   # C[i][j]
+        movsd   0(%r10,%r8,8), %xmm8    # A[i][k]: invariant load, not hoisted
+        movapd  %xmm5, %xmm6
+        mulsd   %xmm8, %xmm6
+        movsd   0(%rcx,%rdi,8), %xmm7   # B[k][j]
+        mulsd   %xmm7, %xmm6
+        addsd   %xmm6, %xmm4
+        movsd   %xmm4, 0(%r11,%rsi,8)
+        leal    1(%r9d), %r9d
+        cmpl    $1100, %r9d
+        jl      .L114
+```
+What remains in this loop:
+- **Indexed addressing** instead of a pointer increment, and the `movslq` of `j`
+  (#4).
+- **The invariant load `A[i][k]`.** gcc -O1 also reloads it, because the store
+  to `C[i][j]` may alias it.
+- **Two copies that register allocation does not coalesce.** Removing them by
+  hand gains only 1-2%.
+
+**Known regression:** gramschmidt is +2.7% (memory-bound column walks; cause
+not yet understood).
+
+### Totals after round 2
+
+All measured in one session against CompCert 3.18. Raw data is in
+`results/final.json` and `results/heldout-*.json`; round-1 data is in
+`results/round1/`.
+
+| suite (geomean vs CompCert 3.18) | faster-compcert | gcc -O1 | gcc -O2 (CompCert model) | gcc -O2 |
+|---|---:|---:|---:|---:|
+| `test/c` (tuned on) | 0.877 | 0.887 | 0.791 | 0.781 |
+| big (held out) | 0.966 | 0.948 | 0.886 | 0.886 |
+| PolyBench (held out) | **0.776** (was 0.845) | 0.749 | 0.648 | 0.643 |
+
+`test/c` and gcc moved by up to 0.6% from round 1 although their code did
+not change. That is the machine's run-to-run drift between sessions.
