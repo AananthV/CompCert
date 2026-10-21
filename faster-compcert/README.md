@@ -14,10 +14,10 @@ Geometric mean of run time relative to CompCert 3.18 (lower is better):
 | compiler | `test/c` (tuned on) | big programs (held out) | PolyBench (held out) |
 |---|---:|---:|---:|
 | CompCert 3.18 | 1.000 | 1.000 | 1.000 |
-| gcc -O1 | 0.891 | 0.949 | 0.739 |
-| **faster-compcert (this fork)** | **0.871** | **0.982** | **0.845** |
-| gcc -O2 restricted to CompCert's semantic model | 0.794 | 0.886 | 0.643 |
-| gcc -O2 | 0.783 | 0.882 | 0.639 |
+| gcc -O1 | 0.887 | 0.948 | 0.749 |
+| **faster-compcert (this fork)** | **0.877** | **0.966** | **0.776** |
+| gcc -O2 restricted to CompCert's semantic model | 0.791 | 0.886 | 0.648 |
+| gcc -O2 | 0.781 | 0.886 | 0.643 |
 
 The heuristics were tuned on `test/c`, so the held-out columns are the honest
 measure of generality ([REPORT.md §7](REPORT.md#7-held-out-evaluation-issue-2)).
@@ -30,7 +30,7 @@ Changes, each fully proved:
 | Deadcode: loads through non-stack pointers no longer make the frame live; CSE: disjoint-offset aliasing | — | sha3 0.82x |
 | x86: fused 32->64 zero-extension, small rotates, `x/2`, `cvtsi2sd`/`sqrtsd` false dependencies | — | aes 0.87x, siphash24 0.92x |
 | new pass `Loadfwd`: load forwarding across join points | `-floadfwd` | spectral 0.60x |
-| new passes `Looprot` + `LICM`: validated loop rotation and loop-invariant code motion | `-floop-rotate`, `-flicm` | aes, sha1, fannkuch |
+| new passes `Looprot` + `LICM`: validated loop rotation and loop-invariant code motion, including chains of dependent operations (#16) | `-floop-rotate`, `-flicm` | aes, sha1, fannkuch; gemm 0.72x, syrk 0.73x, floyd-warshall 0.74x |
 
 Verification:
 
@@ -58,8 +58,10 @@ Known gaps and next steps are in [REPORT.md, section 5](REPORT.md#5-what-remains
 - `harness/asmstats.py`: static statistics of one function, old vs. new `.s`.
 - `harness/check_axioms.sh`: lists the assumptions of the end-to-end
   correctness theorems.
-- `results/`: final timings (`final.json`), the phase-1 baseline
-  (`baseline.json`), and the assumption lists of master and this branch.
+- `results/`: the latest timings on all three suites (`final.json`,
+  `heldout-big.json`, `heldout-polybench.json`), round-1 timings
+  (`round1/`), the phase-1 baseline (`baseline.json`), and the assumption
+  lists of CompCert 3.18 and this fork.
 
 ## Reproducing
 
