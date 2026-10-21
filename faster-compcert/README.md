@@ -9,16 +9,18 @@ assembly before/after.
 
 ## Status
 
-Geometric mean of run time over the 24 programs of `test/c`, relative to
-CompCert 3.18 (lower is better):
+Geometric mean of run time relative to CompCert 3.18 (lower is better):
 
-| compiler | time |
-|---|---:|
-| CompCert 3.18 | 1.000 |
-| gcc -O1 | 0.891 |
-| **faster-compcert (this fork)** | **0.871** |
-| gcc -O2 restricted to CompCert's semantic model | 0.794 |
-| gcc -O2 | 0.783 |
+| compiler | `test/c` (tuned on) | big programs (held out) | PolyBench (held out) |
+|---|---:|---:|---:|
+| CompCert 3.18 | 1.000 | 1.000 | 1.000 |
+| gcc -O1 | 0.891 | 0.949 | 0.739 |
+| **faster-compcert (this fork)** | **0.871** | **0.982** | **0.845** |
+| gcc -O2 restricted to CompCert's semantic model | 0.794 | 0.886 | 0.643 |
+| gcc -O2 | 0.783 | 0.882 | 0.639 |
+
+The heuristics were tuned on `test/c`, so the held-out columns are the honest
+measure of generality ([REPORT.md §7](REPORT.md#7-held-out-evaluation-issue-2)).
 
 Changes, each fully proved:
 
@@ -42,8 +44,14 @@ Known gaps and next steps are in [REPORT.md, section 5](REPORT.md#5-what-remains
 ## Layout
 
 - `REPORT.md`: the report.
-- `harness/bench.py`: compiles the `test/c` benchmarks with several compilers,
-  checks their outputs, and times them.
+- `harness/bench.py`: compiles a benchmark suite with several compilers,
+  checks each program's result, and times it. Suites (`--suite`):
+  - `c`: the 24 programs of `test/c` (default);
+  - `big`: `raytracer`, `spass` and the three `compression` programs;
+  - `polybench`: the 30 PolyBench/C 4.2.1 kernels.
+- `harness/suites.py`: definitions of the `big` and `polybench` suites.
+- `harness/fetch_polybench.sh`: fetches PolyBench/C 4.2.1, pinned. It is not
+  included in this repository because of its licence.
 - `harness/show.py`: prints `bench.py` JSON files side by side, with the
   geomean.
 - `harness/ablate.sh`: leave-one-out ablation of GCC pass families.
@@ -60,6 +68,9 @@ Known gaps and next steps are in [REPORT.md, section 5](REPORT.md#5-what-remains
 git submodule update --init test                 # benchmarks and reference outputs
 python3 faster-compcert/harness/bench.py --core 8 ccomp gcc-O1 gcc-O2-ccmodel gcc-O2 > r.json
 python3 faster-compcert/harness/show.py r.json
+python3 faster-compcert/harness/bench.py --suite big ccomp gcc-O2 > big.json
+faster-compcert/harness/fetch_polybench.sh /path/to/polybench
+python3 faster-compcert/harness/bench.py --suite polybench --polybench /path/to/polybench ccomp gcc-O2 > pb.json
 faster-compcert/harness/check_axioms.sh | diff faster-compcert/results/axioms-master.txt -
 ```
 

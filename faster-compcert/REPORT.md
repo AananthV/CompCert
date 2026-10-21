@@ -20,6 +20,10 @@ This report asks two questions:
    (0.794).
 3. No new axioms were added. The proofs check on all six targets, and the
    regression suite passes.
+4. **Held-out caveat (§7):** on code that was not used for tuning, the gains
+   are smaller. The larger CompCert test programs reach 0.982 (gcc -O1:
+   0.949), and PolyBench reaches 0.845 (gcc -O1: 0.739). The main remaining
+   gap there is address arithmetic in loop nests.
 
 Setup: CompCert 3.18, Rocq 9.1.1, OCaml 4.14.2, GCC 11.4, Intel Xeon Silver 4314.
 
@@ -562,3 +566,126 @@ sha3: 34.1 -> 28.4 ms.
 - **Proof robustness across targets was a real issue.** Several proofs
   depended on x86-only reductions. Checking all targets is needed before
   merging.
+
+---
+
+## 7. Held-out evaluation (issue #2)
+
+Every faster-compcert heuristic was tuned on `test/c`. To see how well the results generalize, we measured two suites that played **no role** in tuning, with no retuning:
+
+- **`big`:** the larger programs of the CompCert test suite: `raytracer`, `spass`, and the three `compression` programs, each checked against a reference result.
+- **`polybench`:** the 30 PolyBench/C 4.2.1 kernels, at a dataset size chosen per kernel. Results are checked by dumping the arrays at MEDIUM size and comparing against gcc -O0.
+
+Both run with `harness/bench.py --suite big|polybench`, minimum of 3 runs, in seconds. Raw data: `results/heldout-*.json`.
+
+| suite (geomean vs CompCert 3.18) | faster-compcert | gcc -O1 | gcc -O2 (CompCert model) | share of the gap to gcc-O2-ccmodel closed |
+|---|---:|---:|---:|---:|
+| `test/c` (tuned on) | 0.871 | 0.891 | 0.794 | 60% |
+| `big` (held out) | **0.982** | 0.949 | 0.886 | 15% |
+| `polybench` (held out) | **0.845** | 0.739 | 0.643 | 38% |
+
+**The `test/c` result overstates the general effect.**
+
+- On held-out code, faster-compcert is still faster than CompCert 3.18, but it **does not beat gcc -O1** in either suite. It beats gcc -O1 on only 2/5 big programs and 7/30 PolyBench kernels.
+- The large integer programs gain almost nothing. Their remaining gap is in code that none of the new passes target: pointer chasing, calls, and struct-heavy code.
+
+### big
+
+| program | CompCert 3.18 | faster-compcert | gcc -O1 | gcc -O2 (CompCert model) | gcc -O2 |
+|---|---:|---:|---:|---:|---:|
+| raytracer | 0.826 | 0.831 | 0.749 | 0.681 | 0.669 |
+| spass | 5.693 | 5.633 | 5.356 | 5.100 | 5.076 |
+| arcode | 0.496 | 0.489 | 0.403 | 0.374 | 0.373 |
+| lzw | 2.607 | 2.366 | 2.585 | 2.327 | 2.329 |
+| lzss | 3.749 | 3.852 | 4.204 | 4.127 | 4.125 |
+| **geomean vs CompCert** | **1.000** | **0.982** | **0.949** | **0.886** | **0.882** |
+
+### polybench
+
+| program | CompCert 3.18 | faster-compcert | gcc -O1 | gcc -O2 (CompCert model) | gcc -O2 |
+|---|---:|---:|---:|---:|---:|
+| correlation | 5.132 | 5.127 | 5.035 | 4.702 | 4.710 |
+| covariance | 5.145 | 5.108 | 5.027 | 4.691 | 4.733 |
+| 2mm | 5.366 | 2.926 | 5.184 | 2.517 | 2.517 |
+| 3mm | 8.759 | 4.621 | 8.465 | 3.868 | 3.858 |
+| atax | 0.057 | 0.033 | 0.036 | 0.029 | 0.029 |
+| bicg | 0.053 | 0.036 | 0.033 | 0.033 | 0.033 |
+| doitgen | 1.655 | 0.952 | 1.436 | 0.724 | 0.725 |
+| mvt | 0.315 | 0.247 | 0.238 | 0.206 | 0.206 |
+| gemm | 1.990 | 1.962 | 0.950 | 0.949 | 0.951 |
+| gemver | 0.339 | 0.273 | 0.256 | 0.225 | 0.225 |
+| gesummv | 0.132 | 0.115 | 0.103 | 0.103 | 0.103 |
+| symm | 2.215 | 1.948 | 1.696 | 1.731 | 1.728 |
+| syr2k | 3.659 | 3.383 | 2.669 | 2.998 | 2.985 |
+| syrk | 1.351 | 1.352 | 0.758 | 0.760 | 0.761 |
+| trmm | 2.176 | 2.072 | 2.015 | 1.545 | 1.552 |
+| cholesky | 0.130 | 0.123 | 0.090 | 0.077 | 0.078 |
+| durbin | 0.027 | 0.025 | 0.023 | 0.019 | 0.018 |
+| gramschmidt | 5.780 | 5.633 | 5.686 | 6.049 | 6.088 |
+| lu | 0.161 | 0.154 | 0.120 | 0.091 | 0.091 |
+| ludcmp | 0.127 | 0.123 | 0.086 | 0.089 | 0.088 |
+| trisolv | 0.121 | 0.059 | 0.072 | 0.058 | 0.059 |
+| deriche | 0.401 | 0.372 | 0.361 | 0.356 | 0.359 |
+| floyd-warshall | 0.246 | 0.225 | 0.097 | 0.097 | 0.097 |
+| nussinov | 6.900 | 5.789 | 6.766 | 3.476 | 3.410 |
+| adi | 0.111 | 0.110 | 0.110 | 0.104 | 0.103 |
+| fdtd-2d | 3.180 | 3.131 | 1.905 | 2.085 | 1.922 |
+| heat-3d | 0.061 | 0.060 | 0.029 | 0.031 | 0.031 |
+| jacobi-1d | 0.011 | 0.011 | 0.008 | 0.008 | 0.008 |
+| jacobi-2d | 4.276 | 3.767 | 2.173 | 2.274 | 2.141 |
+| seidel-2d | 0.238 | 0.236 | 0.232 | 0.235 | 0.234 |
+| **geomean vs CompCert** | **1.000** | **0.845** | **0.739** | **0.643** | **0.639** |
+
+### Findings
+
+1. **Where the new passes generalize.**
+   - Kernels with a loop-carried accumulator in memory, like `C[i][j] += ...` in an inner `k` loop, gain 30-50% from **Loadfwd**: trisolv 0.49×, 3mm 0.53×, 2mm 0.55×, doitgen 0.57×, atax 0.59×, bicg 0.68×. This is the same pattern as spectral.
+   - lzw gains 9%.
+2. **The largest remaining gap: address arithmetic in loop nests.** The worst kernels against gcc-O2-ccmodel are floyd-warshall 2.31×, gemm 2.07×, heat-3d 1.92×, syrk 1.78×, lu 1.69×, nussinov 1.67×, jacobi-2d 1.66× and cholesky 1.59×. Even **gcc -O1** is about 2× faster on gemm, syrk, floyd-warshall and heat-3d. In gemm's inner loop (`C[i][j] += alpha*A[i][k]*B[k][j]`) faster-compcert executes 21 instructions per iteration; gcc -O1 executes 8.
+
+   faster-compcert:
+   ```asm
+   .L114:  movq    %rsi, %r8
+           imulq   $8800, %r8              # C[i] row base: invariant in the j loop
+           leaq    0(%rbp,%r8,1), %r8
+           movslq  %edx, %r11
+           movq    %r11, %rcx
+           movsd   0(%r8,%rcx,8), %xmm0
+           movq    %rsi, %r10
+           imulq   $9600, %r10             # A[i] row base: invariant
+           leaq    0(%r12,%r10,1), %r10
+           movslq  %r9d, %rax
+           movsd   0(%r10,%rax,8), %xmm6   # A[i][k]
+           movapd  %xmm2, %xmm3
+           mulsd   %xmm6, %xmm3
+           imulq   $8800, %rax             # B[k] row base: invariant
+           leaq    0(%rbx,%rax,1), %r10
+           movsd   0(%r10,%rcx,8), %xmm4
+           mulsd   %xmm4, %xmm3
+           addsd   %xmm3, %xmm0
+           movsd   %xmm0, 0(%r8,%r11,8)
+           leal    1(%edx), %edx
+           cmpl    $1100, %edx
+           jl      .L114
+   ```
+   gcc -O1:
+   ```asm
+   .L12:   movapd  %xmm2, %xmm0
+           mulsd   (%rcx), %xmm0
+           mulsd   (%r9,%rdx), %xmm0
+           addsd   (%rdi,%rdx), %xmm0
+           movsd   %xmm0, (%rdi,%rdx)
+           addq    $8, %rdx
+           cmpq    $8800, %rdx
+           jne     .L12
+   ```
+   Three missing transformations, in order of impact:
+   - (a) **LICM of chains of dependent pure operations.** `movslq i` → `imulq $8800` → `leaq base` is invariant, but faster-compcert's LICM hoists only single operations whose arguments are defined outside the loop. It does not hoist chains, nor ops whose argument was itself hoisted. This is a new Tier 1 item, #16.
+   - (b) **Strength reduction** of `j` into a pointer increment (#4).
+   - (c) **Memory operands** on arithmetic (#5).
+3. **Regressions** (reproduced with ≥7 runs):
+   - lzss is +2.8% slower than CompCert 3.18. With `-fno-loadfwd` it is 4% faster than with load forwarding on, and with `-fno-loop-rotate` 2.6% faster.
+   - jacobi-1d (10 ms) is +2.8% slower.
+
+   These are heuristic problems to fix under #7 / #16, not retuned here.
+4. **What this means for the roadmap.** The next items should be chosen by their effect on held-out code, not on `test/c`. Address arithmetic in loop nests (#16, #4) dominates PolyBench. fib-specific work (#8) matters least.
