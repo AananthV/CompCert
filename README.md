@@ -22,13 +22,16 @@ optimizations, many of them found, implemented and proved by LLM agents.
 Details, measurements and the benchmarking harness are in
 [faster-compcert/](faster-compcert/README.md).
 
-| compiler | geomean time on `test/c` (lower is better) |
-|---|---:|
-| CompCert 3.18 | 1.000 |
-| gcc -O1 | 0.891 |
-| **faster-compcert** | **0.871** |
-| gcc -O2, restricted to CompCert's semantic model | 0.794 |
-| gcc -O2 | 0.783 |
+Geomean run time relative to CompCert 3.18 (lower is better). `test/c` was
+used for tuning; the other two suites are held out.
+
+| compiler | `test/c` | big programs | PolyBench |
+|---|---:|---:|---:|
+| CompCert 3.18 | 1.000 | 1.000 | 1.000 |
+| gcc -O1 | 0.891 | 0.949 | 0.739 |
+| **faster-compcert** | **0.871** | **0.982** | **0.845** |
+| gcc -O2, restricted to CompCert's semantic model | 0.794 | 0.886 | 0.643 |
+| gcc -O2 | 0.783 | 0.882 | 0.639 |
 
 Progress so far:
 - [x] Diagnose the gap. The semantic models account for only ~1.5 points of
@@ -42,6 +45,9 @@ Progress so far:
 - [x] Global load forwarding across loop back-edges (new pass `Loadfwd`).
 - [x] Loop-invariant code motion and loop rotation (new passes `LICM`,
   `Looprot`, translation-validated).
+- [x] Held-out evaluation on larger programs and PolyBench ([#2](https://github.com/AananthV/CompCert/issues/2)).
+- [ ] LICM of chains of dependent operations: loop-nest address arithmetic, the
+  largest gap on PolyBench ([#16](https://github.com/AananthV/CompCert/issues/16)).
 - [ ] Induction-variable widening with range analysis (sha1, sha3).
 - [ ] Load-op memory operands on x86 (nbody, aes).
 - [ ] Opt-in libm builtins (`sqrt`, `floor`) and unaligned 64-bit accesses:
