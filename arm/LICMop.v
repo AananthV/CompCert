@@ -24,3 +24,10 @@ Lemma op_safe_correct:
 Proof.
   unfold op_safe; intros; discriminate.
 Qed.
+
+Lemma eval_operation_Omove:
+  forall (F V: Type) (ge: Genv.t F V) sp v m,
+  eval_operation ge sp Omove (v :: nil) m = Some v.
+Proof.
+  intros. reflexivity.
+Qed.

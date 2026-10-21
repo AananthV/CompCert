@@ -63,7 +63,12 @@ let rotate_oracle f =
       | Some (Inop s) ->
           let s = P.to_int s in
           if s < n && body.(s) && s <> h then chain s (x :: acc) cnt else None
-      | Some (Iop (_, _, _, s) | Iload (_, _, _, _, s)) ->
+      (* Loads are not copied: Loadfwd would forward the copied load to
+         the reload of the same location in the loop body, creating a copy
+         that register allocation often fails to coalesce, which
+         lengthens loop-carried dependencies such as [i = next[i]]
+         (3% on lzss). *)
+      | Some (Iop (_, _, _, s)) ->
           let s = P.to_int s in
           if s < n && body.(s) && s <> h && cnt < max_copied
           then chain s (x :: acc) (cnt + 1) else None
