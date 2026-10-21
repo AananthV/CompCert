@@ -1,0 +1,564 @@
+# faster-compcert: report
+
+This report asks two questions:
+
+1. **Why is CompCert slower than GCC -O2?** Is it a limitation of CompCert's
+   semantic models of C and x86-64, or of the set of verified passes that
+   CompCert currently has?
+2. **If it is the passes, can LLM agents find, implement and *prove* the
+   missing transformations?**
+
+**Short answer.**
+
+1. The models are not the main bottleneck. If GCC -O2 is restricted to what
+   CompCert's semantics allow, it is still 20% faster than CompCert. The
+   restriction itself costs GCC only about 1.5 points.
+2. Agents wrote, proved and merged five sets of changes, about 5,100 lines of
+   which 4,470 are Rocq. They take CompCert from 1.00 to 0.871 of its original
+   run time (geometric mean over 24 benchmarks). That is faster than gcc -O1
+   (0.891) and closes about 60% of the gap to "gcc -O2 within CompCert's model"
+   (0.794).
+3. No new axioms were added. The proofs check on all six targets, and the
+   regression suite passes.
+
+Setup: CompCert 3.18, Rocq 9.1.1, OCaml 4.14.2, GCC 11.4, Intel Xeon Silver 4314.
+
+- Every timing is the minimum over at least 7 runs (at least 1.5s in total),
+  pinned to one core. Every run's output is checked against `test/c/Results`.
+- `perf` was not available on the machine, so attribution below uses
+  "assembly surgery": hand-edit CompCert's `.s` output for one transformation,
+  re-assemble it, check the output, and time it.
+
+---
+
+## 1. Phase 1: where does the gap come from?
+
+### 1.1 GCC restricted to CompCert's semantic model
+
+CompCert's semantics forbid some optimizations that GCC performs. GCC has
+flags that switch each of them off:
+
+| CompCert semantics | GCC flag |
+|---|---|
+| signed overflow wraps around (no undefined-behaviour exploitation) | `-fwrapv` |
+| no type-based alias analysis | `-fno-strict-aliasing` |
+| no SIMD instructions in the x86-64 Asm model | `-fno-tree-vectorize` |
+| no FMA contraction | `-fp-contract=off` |
+
+We call `gcc -O2` with these four flags **gcc-O2-ccmodel**. The table below
+shows run times relative to CompCert, so lower is faster.
+
+| config | geomean vs CompCert |
+|---|---:|
+| CompCert 3.18 `ccomp -O` | 1.000 |
+| gcc -O1 | 0.892 |
+| gcc -O2 | 0.783 |
+| **gcc -O2-ccmodel** | **0.795** |
+| gcc -O3-ccmodel | 0.751 |
+
+Restricting GCC to CompCert's model costs it about 1.5 points out of a
+22-point gap. The rest of the gap must come from transformations that
+CompCert's semantics would allow but that CompCert does not perform.
+
+### 1.2 Leave-one-out ablation of GCC passes
+
+Starting from gcc-O2-ccmodel, we turn off one family of GCC passes at a time
+(`harness/ablate.sh`). Each value is a slowdown relative to gcc-O2-ccmodel,
+so 1.00 means turning the family off has no effect. The "CompCert" column is
+CompCert's own time relative to gcc-O2-ccmodel.
+
+| benchmark | CompCert | inline | pre | ivopts | reassoc | licm | looprot | ifconv | layout | sched | vrp | sra | thread | builtin |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| fib | 2.99 | 1.56 | 0.89 | 0.92 | 1.00 | 1.01 | 0.96 | 1.01 | 1.17 | 1.00 | 1.02 | 0.99 | 0.99 | 1.00 |
+| integr | 2.16 | 1.96 | 1.00 | 0.99 | 0.98 | 1.00 | 1.03 | 1.00 | 1.00 | 0.97 | 1.03 | 0.99 | 0.99 | 0.99 |
+| qsort | 0.98 | 1.00 | 0.96 | 0.98 | 1.00 | 1.00 | 0.97 | 0.99 | 0.97 | 1.00 | 1.00 | 1.00 | 0.97 | 1.00 |
+| fft | 1.09 | 1.00 | 1.00 | 1.01 | 1.00 | 1.01 | 1.00 | 1.00 | 1.00 | 0.99 | 1.01 | 1.00 | 1.00 | 1.02 |
+| fftsp | 1.12 | 1.00 | 1.00 | 0.99 | 1.01 | 1.02 | 1.01 | 1.00 | 1.00 | 1.00 | 0.99 | 1.00 | 0.99 | 1.11 |
+| fftw | 1.06 | 0.99 | 0.99 | 0.99 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 0.99 | 0.99 | 1.00 | 0.99 | 0.99 |
+| sha1 | 1.32 | 0.99 | 0.99 | 1.11 | 1.11 | 1.00 | 1.00 | 1.00 | 1.00 | 0.99 | 1.00 | 0.99 | 0.99 | 0.99 |
+| sha3 | 1.52 | 0.99 | 0.99 | 1.15 | 0.99 | 0.99 | 0.99 | 1.00 | 1.00 | 1.00 | 0.99 | 0.99 | 0.96 | 0.99 |
+| aes | 1.15 | 1.00 | 0.85 | 0.96 | 1.03 | 1.00 | 1.00 | 1.00 | 1.01 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| almabench | 1.04 | 1.00 | 1.00 | 1.02 | 0.99 | 1.00 | 0.99 | 1.00 | 1.00 | 0.99 | 0.99 | 1.00 | 0.99 | 0.99 |
+| lists | 1.04 | 1.00 | 1.00 | 1.01 | 1.00 | 1.01 | 1.20 | 1.00 | 1.04 | 1.00 | 1.01 | 1.00 | 1.00 | 1.00 |
+| binarytrees | 1.12 | 1.06 | 1.03 | 1.03 | 1.02 | 1.02 | 1.05 | 1.04 | 1.01 | 1.02 | 1.03 | 1.02 | 1.04 | 1.02 |
+| fannkuch | 0.98 | 1.00 | 0.98 | 0.98 | 0.97 | 0.98 | 0.98 | 0.98 | 0.99 | 1.00 | 1.04 | 1.00 | 1.01 | 0.99 |
+| knucleotide | 1.03 | 1.00 | 0.99 | 1.01 | 1.01 | 1.00 | 1.02 | 1.00 | 1.00 | 0.99 | 1.01 | 1.00 | 0.99 | 1.02 |
+| mandelbrot | 1.04 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 0.99 | 1.00 | 1.00 | 0.99 | 1.00 |
+| nbody | 1.50 | 1.00 | 0.97 | 1.02 | 0.99 | 0.99 | 0.98 | 0.97 | 0.96 | 0.98 | 0.97 | 1.00 | 0.97 | 1.04 |
+| nsieve | 1.06 | 1.02 | 0.99 | 1.01 | 1.00 | 1.01 | 1.01 | 1.02 | 1.12 | 1.02 | 1.03 | 1.01 | 1.00 | 1.01 |
+| nsievebits | 1.15 | 1.00 | 1.00 | 1.01 | 1.00 | 0.99 | 1.00 | 1.00 | 1.05 | 1.03 | 1.00 | 1.00 | 1.00 | 1.00 |
+| spectral | 1.87 | 1.02 | 1.88 | 1.04 | 0.97 | 1.01 | 0.99 | 1.00 | 0.98 | 1.02 | 1.01 | 1.00 | 1.00 | 1.02 |
+| vmach | 1.49 | 1.00 | 1.00 | 1.01 | 1.00 | 1.01 | 1.00 | 1.00 | 1.01 | 1.01 | 1.00 | 1.00 | 1.00 | 1.01 |
+| bisect | 0.97 | 0.98 | 1.01 | 1.00 | 1.00 | 1.01 | 1.00 | 0.99 | 1.00 | 1.00 | 1.01 | 1.00 | 1.00 | 0.98 |
+| chomp | 1.04 | 1.04 | 1.00 | 1.01 | 1.00 | 1.02 | 0.99 | 1.02 | 1.00 | 1.00 | 1.02 | 1.00 | 0.99 | 0.99 |
+| perlin | 1.41 | 1.18 | 1.06 | 1.00 | 0.90 | 1.02 | 1.00 | 1.05 | 0.92 | 1.01 | 1.00 | 1.00 | 1.00 | 1.00 |
+| siphash24 | 1.43 | 1.00 | 1.00 | 1.00 | 1.01 | 1.00 | 1.03 | 1.00 | 1.00 | 1.03 | 1.00 | 1.00 | 1.00 | 1.00 |
+| **geomean** | **1.258** | 1.060 | 1.013 | 1.009 | 0.999 | 1.004 | 1.008 | 1.003 | 1.008 | 1.001 | 1.006 | 1.000 | 0.994 | 1.006 |
+
+What the ablation shows:
+
+- **Single families with a large effect:**
+  - Inlining explains fib, integr and perlin.
+  - PRE/GVN explains spectral (1.88x, which matches CompCert's 1.87x).
+  - Induction-variable optimizations and reassociation explain about 11-15% on
+    sha1 and sha3.
+- **Benchmarks no single family explains:** sha3, nbody, vmach, siphash24
+  and sha1. Either GCC's passes compensate for each other there, or the cause
+  is in code generation rather than in an optimization pass.
+
+### 1.3 Causal attribution by assembly surgery
+
+For each benchmark with a large gap, we hand-applied one transformation at a
+time to CompCert's assembly, checked the output, and measured the time. The
+causes fall into four classes:
+
+- **A:** a missing middle-end (RTL) optimization that CompCert's semantics
+  would permit.
+- **B:** backend code generation (instruction selection, register
+  allocation, peephole).
+- **C:** a genuine limitation of CompCert's C or x86-64 model.
+- **D:** an unverified heuristic choice, where a change needs no proof.
+
+| benchmark (ccomp / gcc-O2-ccmodel) | cause | class | measured effect of fixing it |
+|---|---|---|---|
+| spectral (1.87) | `Au[i]` is reloaded every iteration. CSE works only on extended basic blocks, so its knowledge is lost at the loop header. | A | 0.783 -> 0.464 s (85% of the gap) |
+| integr (2.16) | the call through a constant function pointer becomes direct only after inlining has already run, so the callee is never inlined | A/D | 0.691 -> 0.310 s (all of the gap) |
+| fib (2.99) | no accumulator tail recursion, no recursive inlining, no loop rotation | A/D | 0.626 -> 0.316 s |
+| sha3 (1.52) | dead stores to the local array `bc[]` are kept: `NeedDomain.nmem_add` treats any load through a `Nonstack` pointer as reading the whole stack | A | 33.1 -> 28.2 ms |
+| sha3 | CSE kills `st[j+1..4]` after a store to `st[j]` (no check for disjoint offsets) | A | -1.5 ms |
+| aes (1.15) | global table addresses recomputed at every lookup (no LICM) | A | 85.2 -> 77.2 ms |
+| aes | redundant `movl %r,%r` 32->64-bit zero-extensions (23 per round) | B | 85.2 -> 77.6 ms |
+| sha1 (1.32) | `int` index not widened to 64 bits (needs range information), offsets not folded into addressing modes | A/B | 57.6 -> 46.8 ms |
+| sha1 | `rol 1` not recognized (a shift by 1 has already become `lea`) | B | -2 ms |
+| vmach (1.49) | if-conversion turns the interpreter's `pc` update into a `cmove`, which removes branch prediction | D | 70.7 -> 53.6 ms |
+| nbody (1.50) | `sqrt` is an opaque libm call, so values are spilled around it; no load-op memory operands; no strength reduction | C/B/A | 133 -> 95 ms |
+| nbody | **latent bug:** `__builtin_sqrt` emits `sqrtsd %x5,%x1` with a false dependency on `%x1` | B | 184 -> 112 ms |
+| perlin (1.41) | `floor` is opaque (cannot be shared or hoisted); `grad` is not inlined | C/D | 55.7 -> 32.0 ms |
+| siphash24 (1.43) | 8 byte loads cannot be merged into one 64-bit load: `Mint64` requires 8-byte alignment in the memory model | C | 89.1 -> 66.8 ms |
+| nsieve/nsievebits | block layout takes 2 jumps per iteration; `andq $31,%rcx` before shifts (shift-count masking is not modelled) | D/C | ~-4% each |
+
+**Conclusion of phase 1.** Most of the gap is in classes A, B and D. Class C,
+genuine model limitations, matters for three groups of programs:
+
+- programs that rely on libm: nbody, perlin, fftsp;
+- programs that would need unaligned or merged memory accesses: siphash24;
+- small x86 details: shift-count masking and the frame back-link.
+
+---
+
+## 2. Phase 2: verified transformations written by agents
+
+Each change was given to an agent in its own git worktree, together with the
+phase-1 diagnosis. The rules were the same for every change:
+
+- complete proofs: no `Admitted`, `admit` or new `Axiom`;
+- a new `Parameter` only for an untrusted oracle whose output is validated, or
+  whose choice cannot affect correctness;
+- the regression suite must pass;
+- speedups must be measured.
+
+Every result was re-checked independently: `Print Assumptions` on the
+end-to-end theorems, a rebuild from scratch, the test suite, and re-timing on
+a different core.
+
+### 2.1 The changes
+
+| # | change | kind | size | flag |
+|---|---|---|---|---|
+| 1 | size-based inlining heuristic; a second Inlining -> Constprop round; if-conversion heuristic; latch placement in Linearize | heuristics + composition of existing proofs | ~260 lines added | `-finline-small-functions` |
+| 2 | Deadcode: loads through `Nonstack`/`Glob` pointers no longer make the stack frame live. CSE: offset-disjointness test, including int-indexed arrays with 32-bit overflow | changed proofs | ~470 lines added | (always on) |
+| 3 | x86: fused zero-extending ops `Ozextshruimm`/`Ozextandimm`/`Ozextshlimm`; rotates by 1..3; `x/2` sequence; breaking false dependencies of `cvtsi2sd`/`sqrtsd` | instruction selection, Asm, proofs | ~380 lines added | (always on) |
+| 4 | **new pass `Loadfwd`**: global load forwarding across join points and back edges | new RTL pass with a verified Kildall analysis | 916 + 1038 lines | `-floadfwd` |
+| 5 | **new passes `Looprot` + `LICM`**: loop rotation and loop-invariant code motion | untrusted oracle + verified validator | ~1,500 lines | `-floop-rotate`, `-flicm` |
+
+New RTL pipeline (changes marked `*`):
+
+```
+Tailcall -> Inlining -> Renumber -> Constprop -> Renumber
+  -> *Inlining(2) -> *Renumber -> *Constprop -> *Renumber
+  -> *Looprot -> *LICM -> *Renumber -> *Loadfwd(insert) -> *Loadfwd
+  -> CSE -> Deadcode -> Unusedglob -> Allocation -> ...
+```
+
+### 2.2 How each change is proved
+
+- **Inlining round 2.** Inlining takes a round number, and its correctness
+  lemmas are parameterized by it. `Compiler.v` composes the existing
+  simulations once more. That proof went through on the first try.
+- **Deadcode.** A `Nonstack`/`Glob` abstract pointer satisfies
+  `bc b <> BCstack`, so it cannot point into the current stack frame. Only two
+  `nlive` lemmas needed new cases.
+- **CSE disjointness.** A load equation is kept after a store when the load
+  address is provably "store address + d" and the byte ranges do not overlap
+  modulo 2^64.
+  - For indices of the form `(long)(x + c)`, the 32-bit addition may wrap, so
+    two candidate values of d are generated and both must be disjoint.
+  - The candidates come from a per-architecture function,
+    `CombineOp.addr_deltas`. It is real on x86 and a stub elsewhere.
+- **x86 zero-extensions.** New Asm instructions
+  `Pshrlzx_ri`/`Pandlzx_ri`/`Psallzx_ri` have the semantics
+  `Val.longofintu (op32 x)`, which is the hardware rule that a 32-bit write
+  zeroes the upper half. They are printed as plain `shrl`/`andl`/`sall`.
+- **Loadfwd.** The pass has two parts.
+  1. *Move insertion.* A fresh register `t_L` is created for each memory
+     location (chunk, addressing mode, symbolic arguments). The pass inserts
+     `t_L := r` after loads and full-width stores of that location.
+     - This is a plus-simulation, with registers agreeing up to `max_reg`.
+     - A copy is kept only if the analysis later actually forwards through it.
+       This avoids feeding CSE copies that only increase register pressure.
+  2. *Forwarding.* A forward Kildall analysis tracks facts "r = expr" and
+     "r >= load(chunk, addr, args)", and replaces a matching load by a move.
+     - At join points, facts are generalized by anti-unification. This
+       unifies `long32signed(x6)` held in `x15` on one edge and in `x8` on the
+       other.
+     - The proof is a CSEproof-style lock-step simulation with `regs_lessdef`
+       and `Mem.extends`.
+- **LICM.** An OCaml oracle computes dominators, natural loops and the code
+  to hoist. Coq rebuilds the function from these hints and `check_function`
+  validates it. Among other things, it checks that:
+  - each loop is entered only through its header;
+  - each hoisted op is `op_safe`, i.e. proved never to fail, so executing it
+    speculatively is sound;
+  - each hoisted op does not depend on memory;
+  - its arguments are invariant in the loop;
+  - its destination register is fresh.
+
+  The simulation invariant is: "at every node of loop L, `t` holds
+  `op(args)`". The validator does not rely on the loops being natural, so the
+  oracle remains untrusted.
+- **Looprot.** A generic node-duplication validator. Each transformed node
+  must be a copy of its original with only its successors redirected, and each
+  new successor must be a copy of the corresponding original successor. The
+  proof is a lock-step simulation.
+
+### 2.3 Effect of each change alone
+
+Each value is the change applied alone to master, relative to master (lower is
+better).
+
+| benchmark | heuristics + 2nd inlining | dead-store/alias | x86 isel | load forwarding |
+|---|---:|---:|---:|---:|
+| fib | 0.79 | 0.99 | 0.99 | 0.99 |
+| integr | 0.46 | 1.00 | 0.99 | 1.00 |
+| qsort | 1.00 | 1.00 | 0.99 | 1.00 |
+| fft | 0.98 | 0.98 | 0.93 | 0.93 |
+| fftsp | 0.99 | 0.98 | 0.97 | 0.99 |
+| fftw | 0.99 | 1.00 | 0.99 | 0.99 |
+| sha1 | 1.00 | 1.00 | 0.92 | 1.00 |
+| sha3 | 0.99 | 0.82 | 0.99 | 0.99 |
+| aes | 1.00 | 1.00 | 0.87 | 1.00 |
+| almabench | 1.00 | 1.00 | 1.00 | 1.00 |
+| lists | 1.00 | 1.00 | 1.00 | 1.00 |
+| binarytrees | 0.88 | 1.00 | 0.99 | 0.98 |
+| fannkuch | 1.00 | 1.00 | 1.00 | 1.00 |
+| knucleotide | 1.00 | 0.99 | 0.99 | 0.98 |
+| mandelbrot | 1.00 | 1.00 | 1.00 | 1.00 |
+| nbody | 1.00 | 0.97 | 0.93 | 0.97 |
+| nsieve | 0.85 | 1.00 | 0.99 | 0.98 |
+| nsievebits | 0.97 | 1.00 | 0.99 | 0.99 |
+| spectral | 1.00 | 1.00 | 1.00 | 0.60 |
+| vmach | 0.75 | 1.00 | 0.96 | 0.99 |
+| bisect | 1.00 | 1.00 | 1.00 | 1.00 |
+| chomp | 0.94 | 1.00 | 0.99 | 0.99 |
+| perlin | 0.78 | 1.00 | 1.00 | 1.00 |
+| siphash24 | 1.00 | 1.00 | 0.92 | 1.00 |
+| **geomean** | **0.922** | **0.987** | **0.974** | **0.968** |
+
+Changes 4 and 5 measured alone, by their authors:
+
+- LICM + rotation: aes -10.9%, sha1 -7.6%, siphash24 -4.8%, fannkuch -4.5%,
+  geomean -1.5%. Before the fixes in 2.4 there was one regression: lists
+  +13%.
+- Loadfwd: spectral 0.126 -> 0.0755 s, faster than gcc-O2-ccmodel.
+
+### 2.4 Interactions found while merging
+
+Measured individually, every change looked good. Merged naively, the five
+changes gave 0.889, *worse* than four of them alone (0.885). Ablating them with
+their `-fno-*` flags inside one binary found three interactions:
+
+1. **Loadfwd x CSE (sha3: 28.4 -> 33.6 ms).** Loadfwd forwarded nothing in
+   `keccakf`, but the copies `t_L := r` it inserted were picked up by the new,
+   more precise CSE as replacement registers. That merged ~27 values into
+   one register and caused heavy spilling. *Fix:* keep only the fresh
+   registers that are actually used, and prefer original registers in
+   `find_load`.
+2. **Loop rotation x latch placement (nsieve +16%, lists +15%).**
+   - nsieve: rotation turns the latch's `goto H` into a copy of the exit test.
+     The latch is then no longer eligible for latch placement, and the common
+     path takes two branches per iteration. *Fix:* don't rotate loops whose
+     latch starts at a join point.
+   - lists: the rotated test reads a register just written by `l = next`.
+     *Fix:* don't rotate when an argument of the exit test is defined by a
+     move inside the loop.
+3. **Proof portability.** Some proof scripts worked on x86-64 only:
+   - automatically generated hypothesis names;
+   - `simpl` reducing architecture stubs;
+   - `eauto` closing goals earlier on arm;
+   - `Archi.ptr64 = false` making hypotheses contradictory on x86_32.
+
+   All of them were rewritten to be robust. They now check on x86_64,
+   x86_32, aarch64, arm, powerpc and rv64.
+
+---
+
+## 3. Final results
+
+| benchmark | CompCert 3.18 | faster-compcert | gcc -O1 | gcc -O2 (CompCert model) | gcc -O2 | gcc -O3 |
+|---|---:|---:|---:|---:|---:|---:|
+| fib | 57.7 | 45.7 | 56.5 | 19.3 | 19.3 | 18.5 |
+| integr | 36.0 | 16.7 | 36.3 | 16.7 | 16.7 | 16.6 |
+| qsort | 122.1 | 121.9 | 117.4 | 124.9 | 125.0 | 119.8 |
+| fft | 61.9 | 57.7 | 56.6 | 57.0 | 56.6 | 56.5 |
+| fftsp | 33.3 | 32.2 | 27.0 | 29.7 | 27.0 | 27.1 |
+| fftw | 52.6 | 50.0 | 49.5 | 49.5 | 49.0 | 48.7 |
+| sha1 | 58.7 | 50.4 | 43.7 | 44.2 | 44.1 | 81.4 |
+| sha3 | 34.1 | 28.4 | 22.7 | 22.3 | 22.3 | 17.2 |
+| aes | 83.6 | 67.5 | 65.1 | 72.8 | 72.4 | 72.3 |
+| almabench | 227.5 | 227.0 | 220.3 | 218.2 | 216.4 | 213.2 |
+| lists | 74.0 | 73.9 | 71.4 | 71.4 | 71.3 | 71.4 |
+| binarytrees | 29.5 | 25.9 | 30.3 | 27.0 | 26.9 | 25.2 |
+| fannkuch | 197.9 | 191.5 | 194.9 | 202.7 | 193.3 | 213.4 |
+| knucleotide | 115.8 | 116.8 | 114.9 | 112.9 | 113.3 | 108.7 |
+| mandelbrot | 112.9 | 112.6 | 110.5 | 108.6 | 108.4 | 108.7 |
+| nbody | 131.6 | 121.9 | 95.0 | 84.8 | 85.6 | 160.3 |
+| nsieve | 112.3 | 95.9 | 103.0 | 105.9 | 105.8 | 106.2 |
+| nsievebits | 95.1 | 91.6 | 88.6 | 82.9 | 82.9 | 83.0 |
+| spectral | 125.9 | 72.9 | 125.7 | 67.3 | 57.3 | 61.0 |
+| vmach | 69.0 | 50.4 | 48.4 | 46.4 | 46.6 | 46.5 |
+| bisect | 73.3 | 73.2 | 79.0 | 74.9 | 75.1 | 73.0 |
+| chomp | 161.6 | 153.2 | 158.9 | 155.9 | 153.1 | 154.3 |
+| perlin | 54.0 | 43.3 | 35.3 | 38.4 | 38.5 | 24.1 |
+| siphash24 | 90.3 | 86.0 | 81.0 | 63.3 | 63.2 | 50.2 |
+| **geomean vs CompCert** | **1.000** | **0.871** | **0.891** | **0.794** | **0.783** | **0.790** |
+
+(Times are in ms. `faster-compcert` is this fork with all changes enabled.)
+
+- **Overall:** faster-compcert is **0.871x** CompCert 3.18's time. That is
+  ahead of gcc -O1 (0.891) and about **60%** of the way to gcc-O2-ccmodel
+  (0.794), in log-geomean terms.
+- **Where it now matches or beats gcc-O2-ccmodel:** integr, aes, binarytrees,
+  fannkuch, nsieve, bisect and chomp, plus qsort, which was already ahead.
+- **Where it is close:** spectral (73 vs 67 ms) and vmach (50 vs 46 ms).
+- **Costs:** object-code `.text` of the 24 programs grows by +5.1% (57,257 ->
+  60,167 bytes), mostly from inlining. Compiling `test/c` takes 1.43 -> 2.10 s
+  (**+47%**): the second Inlining/Constprop round, Loadfwd's three analysis
+  runs, LICM's dominator computation, and larger functions after inlining.
+  Compile time was not optimized.
+
+### Verification status
+
+- `Print Assumptions transf_c_program_correct` shows 5 additions compared with
+  master (`results/axioms-*.txt`):
+  - three command-line flags, of the same kind as the existing `optim_*`:
+    `Compopts.optim_loadfwd`, `optim_licm`, `optim_looprot`;
+  - two untrusted oracles whose output is always validated by verified code:
+    `LICM.licm_oracle`, `Looprot.rotate_oracle`.
+- No `Admitted`, `admit` or `Axiom` was added.
+- `make proof` succeeds for x86_64, x86_32, aarch64, arm, powerpc and rv64.
+- `make -C test all test` passes: 154 tests.
+- **Trusted base:** the Asm semantics of the three new zero-extending
+  instructions, and the printer changes. The printer emits extra `xorps`/`xorpd`
+  to clear a destination register before `cvtsi2sd`/`cvtss2sd`/`sqrtsd`.
+
+---
+
+## 4. What the assembly looks like
+
+### spectral: `eval_A_times_u` inner loop (load forwarding + LICM + rotation + x86 fixes)
+
+Before: `Au[i]` (`0(%rdx,%rax,8)`) is loaded, added to and stored on every
+iteration. The loop is tested at the top, with a `jmp` back.
+```asm
+.L102:  cmpl    %edi, %r8d
+        jge     .L103
+        movsd   .L104(%rip), %xmm0
+        leal    0(%r9d,%r8d,1), %eax
+        leal    1(%r9d,%r8d,1), %r10d
+        imull   %r10d, %eax
+        testl   %eax, %eax              # x/2 via test/lea/cmov/sar
+        leal    1(%eax), %ecx
+        cmovl   %rcx, %rax
+        sarl    $1, %eax
+        leal    1(%eax,%r9d,1), %r10d
+        cvtsi2sd %r10d, %xmm5           # false dependency on old xmm5
+        divsd   %xmm5, %xmm0
+        movslq  %r9d, %rax              # loop-invariant sign extension
+        movsd   0(%rdx,%rax,8), %xmm1   # reload Au[i]
+        movslq  %r8d, %r10
+        movsd   0(%rsi,%r10,8), %xmm4
+        mulsd   %xmm4, %xmm0
+        addsd   %xmm0, %xmm1
+        movsd   %xmm1, 0(%rdx,%rax,8)   # store Au[i]
+        leal    1(%r8d), %r8d
+        jmp     .L102
+```
+After: `Au[i]` stays in `%xmm1`, which carries the loop dependency, so only the
+store remains. `movslq %r10d,%r9` is hoisted before the loop. The test is at
+the bottom. `x/2` is `shr/lea/sar`. `cvtsi2sd`'s destination is cleared first.
+```asm
+.L103:  movsd   .L104(%rip), %xmm0
+        leal    0(%r10d,%r8d,1), %eax
+        leal    1(%r10d,%r8d,1), %r11d
+        imull   %r11d, %eax
+        movq    %rax, %rcx
+        shrl    $31, %ecx
+        leal    0(%eax,%ecx,1), %eax
+        sarl    $1, %eax
+        leal    1(%eax,%r10d,1), %r11d
+        xorpd   %xmm3, %xmm3
+        cvtsi2sd %r11d, %xmm3
+        divsd   %xmm3, %xmm0
+        movslq  %r8d, %r11
+        movsd   0(%rsi,%r11,8), %xmm4
+        mulsd   %xmm4, %xmm0
+        addsd   %xmm0, %xmm1            # Au[i] forwarded in a register
+        movsd   %xmm1, 0(%rdx,%r9,8)
+        leal    1(%r8d), %r8d
+        cmpl    %edi, %r8d
+        jl      .L103
+```
+spectral: 125.9 -> 72.9 ms.
+
+### aes: `rijndaelEncrypt` round loop (zero-extension fusion + LICM)
+
+Before: every table lookup recomputes `leaq TeN(%rip)` and zero-extends the
+index with `movl %r,%r`.
+```asm
+        leaq    Te0(%rip), %r9
+        movq    %rbx, %rdx
+        shrl    $24, %edx
+        movl    %edx, %edx              # zero-extension
+        movl    0(%r9,%rdx,4), %r10d
+        leaq    Te1(%rip), %r11
+        movq    %r8, %r9
+        shrl    $16, %r9d
+        andl    $255, %r9d
+        movl    %r9d, %edx              # zero-extension
+        movl    0(%r11,%rdx,4), %r11d
+        xorl    %r11d, %r10d
+```
+After: the table bases live in `%rdx/%r9/%r14/%r8`, hoisted out of the loop.
+`shrl`/`andl` are `Pshrlzx`/`Pandlzx`, whose 64-bit result is already
+zero-extended.
+```asm
+        movq    %rax, %r10
+        shrl    $24, %r10d
+        movl    0(%rdx,%r10,4), %r13d
+        movq    %r12, %r10
+        shrl    $16, %r10d
+        andl    $255, %r10d
+        movl    0(%r9,%r10,4), %r10d
+        xorl    %r10d, %r13d
+```
+Static counts for `rijndaelEncrypt`:
+
+| | before | after |
+|---|---:|---:|
+| instructions | 433 | 363 |
+| `movl %r,%r` | 34 | 0 |
+| `leaq sym(%rip)` | 48 | 20 |
+
+aes: 83.6 -> 67.5 ms, faster than gcc -O2 (72.4 ms).
+
+### integr: `test` (second inlining round)
+
+Before: `f(x)` (with `f = square`) becomes a direct `call square` only after
+inlining has run. All xmm registers are caller-saved, so `s`, `x` and `h` live
+in stack slots across the call.
+```asm
+.L101:  testl   %ebx, %ebx
+        jle     .L102
+        movsd   24(%rsp), %xmm0
+        call    square
+        movsd   16(%rsp), %xmm3
+        addsd   %xmm0, %xmm3
+        movsd   %xmm3, 16(%rsp)
+        leal    -1(%ebx), %ebx
+        movsd   24(%rsp), %xmm4
+        movsd   32(%rsp), %xmm5
+        addsd   %xmm5, %xmm4
+        movsd   %xmm4, 24(%rsp)
+        jmp     .L101
+```
+After: the second round inlines `square`. Everything stays in registers, and
+the loop is rotated.
+```asm
+.L102:  movapd  %xmm1, %xmm2
+        mulsd   %xmm1, %xmm2
+        addsd   %xmm2, %xmm0
+        leal    -1(%edi), %edi
+        addsd   %xmm3, %xmm1
+        testl   %edi, %edi
+        jg      .L102
+```
+integr: 36.0 -> 16.7 ms, the same as gcc -O2.
+
+### vmach: `wordcode_interp` (if-conversion heuristic)
+
+Before: the conditional branch of the interpreted program becomes a `cmove`
+on the interpreter `pc`. The next instruction fetch then depends on the
+comparison through a data dependency, which defeats branch prediction.
+```asm
+        leaq    0(%r12,%rcx,4), %rdi
+        cmpq    $0, %r11
+        cmove   %r12, %rdi
+        movq    %rdi, %r12
+        jmp     .L100
+```
+After: a conditional update `if (c) x = e` is if-converted only when `e`
+costs at most 3, so this becomes a predictable branch. The same function also
+loses all 6 of its redundant `movl %r,%r`.
+
+vmach: 69.0 -> 50.4 ms.
+
+### sha3: `keccakf` (Deadcode precision)
+
+The 34 stores per round to the local array `bc[]` are now recognized as dead
+and removed. Before, every load through the parameter `st` (a `Nonstack`
+pointer) made the whole stack frame live.
+
+| | before | after |
+|---|---:|---:|
+| instructions | 329 | 290 |
+| stores to `(%rsp)` | 41 | 8 |
+| rotates recognized | 21 | 24 |
+
+sha3: 34.1 -> 28.4 ms.
+
+---
+
+## 5. What remains, and what it would take
+
+| remaining gap | example | class | what it would take |
+|---|---|---|---|
+| libm functions are opaque | nbody (`sqrt`), perlin (`floor`), fftsp (`sincosf`) | C | a trusted spec of libm functions, or an opt-in flag that maps them to builtins. The `sqrtsd` dependency fix (change 3) makes `__builtin_sqrt` profitable: nbody 182 -> 112 ms. |
+| unaligned / merged memory accesses | siphash24 (82% of its gap) | C | an unaligned 64-bit memory chunk in the memory model |
+| widening `int` induction variables | sha1, sha3 | A | an interval / range analysis in ValueAnalysis |
+| load-op memory operands | nbody (-10%), aes (-3%) | B | Asm instructions with memory operands; Deadcode/CSE invariants for operators that read memory |
+| accumulator tail recursion, recursive inlining | fib | A | a new pass; a bounded-depth Inlining proof |
+| register allocation around calls | fftsp, nbody | B/C | live-range splitting; per-callee clobber sets (IPA-RA) |
+
+## 6. Observations about agent-written proofs
+
+- **Proof volume is not the bottleneck.** The largest pass, Loadfwd, is about
+  1,950 lines. Its author's first design passed its proofs quickly but was
+  imprecise: substituting definitions too early broke monotonicity at loop
+  headers. It needed one redesign of the abstract domain, using
+  anti-unification. Most other proofs needed about 10-15 compile/fix
+  iterations, mostly for tactic details.
+- **Translation validation is agent-friendly.** For LICM and loop rotation,
+  agents wrote untrusted OCaml oracles and small verified checkers. The
+  checkers are simpler to prove, and they keep the heuristics free to change.
+- **Performance engineering was harder than the proofs.** The most expensive
+  part was diagnosing performance interactions:
+  - register pressure (the CSE cap; Loadfwd's copies feeding CSE);
+  - layout (rotation vs. latch placement);
+  - micro-architectural effects (the rotated test reading a register that was
+    just written).
+
+  This needed measuring each pass alone, then the merged set, and ablating
+  with flags.
+- **Proof robustness across targets was a real issue.** Several proofs
+  depended on x86-only reductions. Checking all targets is needed before
+  merging.
