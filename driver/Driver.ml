@@ -199,6 +199,7 @@ Processing options:
   -fiv-widen     Perform induction-variable widening [on]
   -floadfwd      Perform global forwarding of stored and loaded values [on]
   -fredundancy   Perform redundancy elimination [on]
+  -fload-op      Use memory operands in arithmetic instructions [off]
   -finline       Perform inlining of functions [on]
   -finline-functions-called-once Integrate functions only required by their
                  single caller [on]
@@ -397,6 +398,7 @@ let cmdline_actions =
   @ f_opt "loop-rotate" option_flooprotate
   @ f_opt "licm" option_flicm
   @ f_opt "iv-widen" option_fivwiden
+  @ f_opt "load-op" option_floadop
   @ f_opt "redundancy" option_fredundancy
   @ f_opt "inline" option_finline
   @ f_opt "inline-functions-called-once" option_finline_functions_called_once

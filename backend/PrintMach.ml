@@ -51,6 +51,13 @@ let print_instruction pp i =
       fprintf pp "\t%a = %s[%a]\n"
          reg dst (name_of_chunk chunk)
          (PrintOp.print_addressing reg) (addr, args)
+  | Mloadop(op, chunk, addr, args, res) ->
+      let opnd pp = function
+        | `Reg r -> reg pp r
+        | `Mem -> fprintf pp "%s[%a]" (name_of_chunk chunk)
+                    (PrintOp.print_addressing reg) (addr, args) in
+      fprintf pp "\t%a = %a\n"
+         reg res (PrintOp.print_operation opnd) (op, [`Reg res; `Mem])
   | Mstore(chunk, addr, args, src) ->
       fprintf pp "\t%s[%a] = %a\n"
          (name_of_chunk chunk)

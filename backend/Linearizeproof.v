@@ -679,7 +679,9 @@ Proof.
   left; econstructor; split.
   simpl. apply plus_one. econstructor; eauto.
   rewrite (stacksize_preserved _ _ TRF). eauto.
+  replace (fn_sig tf) with (LTL.fn_sig f).
   rewrite (match_parent_locset _ _ STACKS). econstructor; eauto.
+  exploit (sig_preserved (Internal f) (Internal tf)). simpl. rewrite TRF; auto. auto.
 
   (* internal functions *)
   assert (REACH: (reachable f)!!(LTL.fn_entrypoint f) = true).

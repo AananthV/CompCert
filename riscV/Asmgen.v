@@ -869,6 +869,8 @@ Definition transl_instr (f: Mach.function) (i: Mach.instruction)
       OK (make_epilogue f (Pj_s symb sig :: k))
   | Mbuiltin ef args res =>
       OK (Pbuiltin ef (List.map (map_builtin_arg preg_of) args) (map_builtin_res preg_of res) :: k)
+  | Mloadop _ _ _ _ _ =>
+      Error (msg "Asmgen: Mloadop is not supported on this target")
   | Mlabel lbl =>
       OK (Plabel lbl :: k)
   | Mgoto lbl =>

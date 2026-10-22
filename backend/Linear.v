@@ -37,7 +37,10 @@ Inductive instruction: Type :=
   | Lgoto: label -> instruction
   | Lcond: condition -> list mreg -> label -> instruction
   | Ljumptable: mreg -> list label -> instruction
-  | Lreturn: instruction.
+  | Lreturn: instruction
+  | Lloadop: operation -> memory_chunk -> addressing -> list mreg -> mreg -> instruction.
+      (**r [Lloadop op chunk addr args res] loads a value [v] and
+           sets [res] to [op(res, v)]. *)
 
 Definition code: Type := list instruction.
 
@@ -166,6 +169,14 @@ Inductive step: state -> trace -> state -> Prop :=
       rs' = Locmap.set (R dst) v (undef_regs (destroyed_by_load chunk addr) rs) ->
       step (State s f sp (Lload chunk addr args dst :: b) rs m)
         E0 (State s f sp b rs' m)
+  | exec_Lloadop:
+      forall s f sp op chunk addr args res b rs m a v w rs',
+      eval_addressing ge sp addr (reglist rs args) = Some a ->
+      Mem.loadv chunk m a = Some v ->
+      eval_operation ge sp op (rs (R res) :: v :: nil) m = Some w ->
+      rs' = Locmap.set (R res) w (undef_regs (destroyed_by_load chunk addr ++ destroyed_by_op op) rs) ->
+      step (State s f sp (Lloadop op chunk addr args res :: b) rs m)
+        E0 (State s f sp b rs' m)
   | exec_Lstore:
       forall s f sp chunk addr args src b rs m m' a rs',
       eval_addressing ge sp addr (reglist rs args) = Some a ->
@@ -228,11 +239,11 @@ Inductive step: state -> trace -> state -> Prop :=
       forall s f stk b rs m m',
       Mem.free m stk 0 f.(fn_stacksize) = Some m' ->
       step (State s f (Vptr stk Ptrofs.zero) (Lreturn :: b) rs m)
-        E0 (Returnstate s (return_regs (parent_locset s) rs) m')
+        E0 (Returnstate s (return_regs_res f.(fn_sig) (parent_locset s) rs) m')
   | exec_function_internal:
       forall s f rs m rs' m' stk,
       Mem.alloc m 0 f.(fn_stacksize) = (m', stk) ->
-      rs' = undef_regs destroyed_at_function_entry (call_regs rs) ->
+      rs' = undef_regs destroyed_at_function_entry (call_regs f.(fn_sig) rs) ->
       step (Callstate s (Internal f) rs m)
         E0 (State s f (Vptr stk Ptrofs.zero) f.(fn_code) rs' m')
   | exec_function_external:

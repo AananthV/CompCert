@@ -48,6 +48,9 @@ Parameter optim_licm: unit -> bool.
 (** Flag -fiv-widen.  For induction-variable widening. *)
 Parameter optim_ivwiden: unit -> bool.
 
+(** Flag -fload-op.  For memory operands in arithmetic instructions. *)
+Parameter optim_loadop: unit -> bool.
+
 (** Flag -fredundancy.  For dead code elimination. *)
 Parameter optim_redundancy: unit -> bool.
 

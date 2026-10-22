@@ -71,19 +71,29 @@ Definition locset := Locmap.t.
   (environments mapping locations to values) by the following two
   functions.
 
-  [call_regs caller] returns the location set at function entry,
-  as a function of the location set [caller] of the calling function.
-- Machine registers have the same values as in the caller.
+  [call_regs sg caller] returns the location set at entry of a function
+  of signature [sg], as a function of the location set [caller] of the
+  calling function.
+- Callee-save machine registers, and the machine registers used to pass
+  the parameters, have the same values as in the caller.
+- The other machine registers are initialized to undefined values:
+  the function cannot depend on the values that its caller left there.
 - Incoming stack slots (used for parameter passing) have the same
   values as the corresponding outgoing stack slots (used for argument
   passing) in the caller.
 - Local and outgoing stack slots are initialized to undefined values.
 *)
 
-Definition call_regs (caller: locset) : locset :=
+Definition param_reg (sg: signature) (r: mreg) : bool :=
+  proj_sumbool (In_dec Loc.eq (R r) (regs_of_rpairs (loc_arguments sg))).
+
+Definition result_reg (sg: signature) (r: mreg) : bool :=
+  proj_sumbool (In_dec mreg_eq r (regs_of_rpair (loc_result sg))).
+
+Definition call_regs (sg: signature) (caller: locset) : locset :=
   fun (l: loc) =>
     match l with
-    | R r => caller (R r)
+    | R r => if is_callee_save r || param_reg sg r then caller (R r) else Vundef
     | S Local ofs ty => Vundef
     | S Incoming ofs ty => caller (S Outgoing ofs ty)
     | S Outgoing ofs ty => Vundef
@@ -112,6 +122,21 @@ Definition return_regs (caller callee: locset) : locset :=
 (** [undef_caller_save_regs ls] models the effect of calling
     an external function: caller-save registers and outgoing locations
     can change unpredictably, hence we set them to [Vundef]. *)
+
+(** [return_regs_res sg caller callee] is the location set after
+  a function of signature [sg] returns: like [return_regs caller callee],
+  except that the caller-save machine registers that do not hold the result
+  are undefined: the caller cannot depend on the values that the callee
+  left there. *)
+
+Definition return_regs_res (sg: signature) (caller callee: locset) : locset :=
+  fun (l: loc) =>
+    match l with
+    | R r => if is_callee_save r then caller (R r)
+             else if result_reg sg r then callee (R r) else Vundef
+    | S Outgoing ofs ty => Vundef
+    | S sl ofs ty => caller (S sl ofs ty)
+    end.
 
 Definition undef_caller_save_regs (ls: locset) : locset :=
   fun (l: loc) =>
@@ -265,10 +290,10 @@ Inductive step: state -> trace -> state -> Prop :=
   | exec_Lreturn: forall s f sp bb rs m m',
       Mem.free m sp 0 f.(fn_stacksize) = Some m' ->
       step (Block s f (Vptr sp Ptrofs.zero) (Lreturn :: bb) rs m)
-        E0 (Returnstate s (return_regs (parent_locset s) rs) m')
+        E0 (Returnstate s (return_regs_res f.(fn_sig) (parent_locset s) rs) m')
   | exec_function_internal: forall s f rs m m' sp rs',
       Mem.alloc m 0 f.(fn_stacksize) = (m', sp) ->
-      rs' = undef_regs destroyed_at_function_entry (call_regs rs) ->
+      rs' = undef_regs destroyed_at_function_entry (call_regs f.(fn_sig) rs) ->
       step (Callstate s (Internal f) rs m)
         E0 (State s f (Vptr sp Ptrofs.zero) f.(fn_entrypoint) rs' m')
   | exec_function_external: forall s ef t args res rs m rs' m',

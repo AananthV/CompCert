@@ -65,7 +65,10 @@ Inductive instruction: Type :=
   | Mgoto: label -> instruction
   | Mcond: condition -> list mreg -> label -> instruction
   | Mjumptable: mreg -> list label -> instruction
-  | Mreturn: instruction.
+  | Mreturn: instruction
+  | Mloadop: operation -> memory_chunk -> addressing -> list mreg -> mreg -> instruction.
+      (**r [Mloadop op chunk addr args res] loads a value [v] and
+           sets [res] to [op(res, v)]. *)
 
 Definition code := list instruction.
 
@@ -326,6 +329,14 @@ Inductive step: state -> trace -> state -> Prop :=
       Mem.loadv chunk m a = Some v ->
       rs' = ((undef_regs (destroyed_by_load chunk addr) rs)#dst <- v) ->
       step (State s f sp (Mload chunk addr args dst :: c) rs m)
+        E0 (State s f sp c rs' m)
+  | exec_Mloadop:
+      forall s f sp op chunk addr args res c rs m a v w rs',
+      eval_addressing ge sp addr rs##args = Some a ->
+      Mem.loadv chunk m a = Some v ->
+      eval_operation ge sp op (rs res :: v :: nil) m = Some w ->
+      rs' = ((undef_regs (destroyed_by_load chunk addr ++ destroyed_by_op op) rs)#res <- w) ->
+      step (State s f sp (Mloadop op chunk addr args res :: c) rs m)
         E0 (State s f sp c rs' m)
   | exec_Mstore:
       forall s f sp chunk addr args src c rs m m' a rs',

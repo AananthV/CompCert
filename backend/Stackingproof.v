@@ -693,12 +693,13 @@ Qed.
 (** Preservation at function entry. *)
 
 Lemma agree_regs_call_regs:
-  forall j ls rs,
+  forall j sg ls rs,
   agree_regs j ls rs ->
-  agree_regs j (call_regs ls) rs.
+  agree_regs j (call_regs sg ls) rs.
 Proof.
   intros.
-  unfold call_regs; intros; red; intros; auto.
+  unfold call_regs; intros; red; intros.
+  destruct (is_callee_save r || param_reg sg r); auto.
 Qed.
 
 (** ** Properties of [agree_locs] *)
@@ -1010,7 +1011,7 @@ Lemma save_callee_save_correct:
   (forall r, Val.has_type (ls (R r)) (mreg_type r)) ->
   agree_callee_save ls ls0 ->
   agree_regs j ls rs ->
-  let ls1 := LTL.undef_regs destroyed_at_function_entry (LTL.call_regs ls) in
+  let ls1 := LTL.undef_regs destroyed_at_function_entry (LTL.call_regs (Linear.fn_sig f) ls) in
   let rs1 := undef_regs destroyed_at_function_entry rs in
   exists rs', exists m',
      star step tge
@@ -1023,7 +1024,8 @@ Proof.
   intros until P; intros SEP TY AGCS AG; intros ls1 rs1.
   exploit (save_callee_save_rec_correct j cs fb sp ls1).
 - intros. unfold ls1. apply LTL_undef_regs_same. eapply destroyed_by_setstack_function_entry; eauto.
-- intros. unfold ls1. apply undef_regs_type. apply TY.
+- intros. unfold ls1. apply undef_regs_type. unfold call_regs.
+  destruct (is_callee_save r || param_reg (Linear.fn_sig f) r); [apply TY | exact I].
 - exact b.(used_callee_save_prop).
 - eexact SEP.
 - instantiate (1 := rs1). apply agree_regs_undef_regs. apply agree_regs_call_regs. auto.
@@ -1032,7 +1034,7 @@ Proof.
   split. eexact EXEC.
   split. rewrite (contains_callee_saves_exten j sp ls0 ls1). exact SEP.
   intros. apply b.(used_callee_save_prop) in H.
-    unfold ls1. rewrite LTL_undef_regs_others. unfold call_regs.
+    unfold ls1. rewrite LTL_undef_regs_others. unfold call_regs. rewrite H. simpl.
     apply AGCS; auto.
     red; intros.
     assert (existsb is_callee_save destroyed_at_function_entry = false)
@@ -1054,7 +1056,7 @@ Lemma function_prologue_correct:
   agree_callee_save ls ls0 ->
   agree_outgoing_arguments (Linear.fn_sig f) ls ls0 ->
   (forall r, Val.has_type (ls (R r)) (mreg_type r)) ->
-  ls1 = LTL.undef_regs destroyed_at_function_entry (LTL.call_regs ls) ->
+  ls1 = LTL.undef_regs destroyed_at_function_entry (LTL.call_regs (Linear.fn_sig f) ls) ->
   rs1 = undef_regs destroyed_at_function_entry rs ->
   Mem.alloc m1 0 f.(Linear.fn_stacksize) = (m2, sp) ->
   Val.has_type parent Tptr -> Val.has_type ra Tptr ->
@@ -1116,7 +1118,7 @@ Local Opaque b fe.
   rewrite sep_swap5 in SEP.
   exploit (save_callee_save_correct j' ls ls0 rs); eauto.
   apply agree_regs_inject_incr with j; auto.
-  replace (LTL.undef_regs destroyed_at_function_entry (call_regs ls)) with ls1 by auto.
+  replace (LTL.undef_regs destroyed_at_function_entry (call_regs (Linear.fn_sig f) ls)) with ls1 by auto.
   replace (undef_regs destroyed_at_function_entry rs) with rs1 by auto.
   clear SEP; intros (rs2 & m5' & SAVE_CS & SEP & PERMS & AGREGS').
   rewrite sep_swap5 in SEP.
@@ -1154,8 +1156,9 @@ Local Opaque b fe.
   split. eexact SAVE_CS.
   split. exact AGREGS'.
   split. rewrite LS1. apply agree_locs_undef_locs; [|reflexivity].
-    constructor; intros. unfold call_regs. apply AGCS.
-    unfold mreg_within_bounds in H; tauto.
+    constructor; intros. unfold call_regs.
+    assert (CS: is_callee_save r = true) by (unfold mreg_within_bounds in H; tauto).
+    rewrite CS. simpl. apply AGCS. auto.
     unfold call_regs. apply AGARGS. apply incoming_slot_in_parameters; auto.
   split. exact SEPFINAL.
   split. exact SAME. exact INCR.
@@ -1256,6 +1259,21 @@ Qed.
   the execution of a function epilogue (reloading of used callee-save
   registers + reloading of the link and return address + freeing
   of the frame). *)
+
+Lemma agree_regs_return_regs_res:
+  forall j sg ls0 ls rs,
+  agree_regs j (return_regs ls0 ls) rs -> agree_regs j (return_regs_res sg ls0 ls) rs.
+Proof.
+  unfold agree_regs, return_regs, return_regs_res; intros. generalize (H r).
+  destruct (is_callee_save r); auto. destruct (result_reg sg r); auto.
+Qed.
+
+Lemma agree_callee_save_return_regs_res:
+  forall sg ls0 ls, agree_callee_save (return_regs_res sg ls0 ls) ls0.
+Proof.
+  unfold agree_callee_save, return_regs_res; intros.
+  destruct l. rewrite H; auto. destruct sl; auto; contradiction.
+Qed.
 
 Lemma function_epilogue_correct:
   forall m' j sp' ls ls0 pa ra P m rs sp m1 k cs fb,
@@ -1967,6 +1985,44 @@ Proof.
   apply agree_regs_set_reg. rewrite transl_destroyed_by_load, simplify_load_destroyed. apply agree_regs_undef_regs; auto. auto.
   apply agree_locs_set_reg. apply agree_locs_undef_locs. auto. apply destroyed_by_load_caller_save. auto.
 
+- (* Lloadop *)
+  generalize SEP; intros SEP0.
+  assert (exists a',
+          eval_addressing ge (Vptr sp' Ptrofs.zero) (transl_addr (make_env (function_bounds f)) addr) rs0##args = Some a'
+       /\ Val.inject j a a').
+  eapply eval_addressing_inject; eauto.
+  eapply globalenv_inject_preserves_globals. eapply sep_proj2. eapply sep_proj2. eapply sep_proj2. eexact SEP.
+  eapply agree_reglist; eauto.
+  destruct H2 as [a' [A B]].
+  exploit loadv_parallel_rule.
+  apply sep_proj2 in SEP. apply sep_proj2 in SEP. apply sep_proj1 in SEP. eexact SEP.
+  eauto. eauto.
+  intros [v' [C D]].
+  exploit simplify_load_correct; eauto.
+  intros [v'' [E F]].
+  assert (G: Val.inject j v v'').
+  { inv F; auto. inv D; auto. }
+  assert (exists w',
+          eval_operation ge (Vptr sp' Ptrofs.zero) (transl_op (make_env (function_bounds f)) op) (rs0 res :: v'' :: nil) m' = Some w'
+       /\ Val.inject j w w').
+  eapply eval_operation_inject; eauto.
+  eapply globalenv_inject_preserves_globals. eapply sep_proj2. eapply sep_proj2. eapply sep_proj2. eexact SEP0.
+  apply sep_proj2 in SEP0. apply sep_proj2 in SEP0. apply sep_proj1 in SEP0. exact SEP0.
+  destruct H2 as [w' [I J]].
+  econstructor; split.
+  apply plus_one. econstructor.
+  instantiate (1 := a'). rewrite <- A. apply eval_addressing_preserved. exact symbols_preserved.
+  eexact E.
+  instantiate (1 := w'). rewrite <- I. apply eval_operation_preserved. exact symbols_preserved.
+  eauto.
+  econstructor; eauto with coqlib.
+  apply agree_regs_set_reg; auto.
+  rewrite transl_destroyed_by_op, transl_destroyed_by_load, simplify_load_destroyed.
+  apply agree_regs_undef_regs; auto.
+  apply agree_locs_set_reg; auto. apply agree_locs_undef_locs. auto.
+  rewrite existsb_app. rewrite destroyed_by_load_caller_save, destroyed_by_op_caller_save. auto.
+  apply frame_set_reg. apply frame_undef_regs. exact SEP.
+
 - (* Lstore *)
   assert (exists a',
           eval_addressing ge (Vptr sp' Ptrofs.zero) (transl_addr (make_env (function_bounds f)) addr) rs0##args = Some a'
@@ -2095,7 +2151,7 @@ Proof.
   intros (rs' & m1' & A & B & C & D & E & F & G).
   econstructor; split.
   eapply plus_right. eexact D. econstructor; eauto. traceEq.
-  econstructor; eauto.
+  econstructor; eauto using agree_regs_return_regs_res, agree_callee_save_return_regs_res.
   rewrite sep_swap; exact G.
 
 - (* internal function *)

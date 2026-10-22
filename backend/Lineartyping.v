@@ -78,6 +78,11 @@ Definition wt_instr (i: instruction) : bool :=
       end
   | Lload chunk addr args dst =>
       subtype (type_of_chunk chunk) (mreg_type dst)
+  | Lloadop op chunk addr args res =>
+      match op with
+      | Omove => false
+      | _ => subtype (snd (type_of_operation op)) (mreg_type res)
+      end
   | Ltailcall sg ros =>
       zeq (size_arguments sg) 0
   | Lbuiltin ef args res =>
@@ -132,9 +137,10 @@ Proof.
 Qed.
 
 Lemma wt_call_regs:
-  forall ls, wt_locset ls -> wt_locset (call_regs ls).
+  forall sg ls, wt_locset ls -> wt_locset (call_regs sg ls).
 Proof.
-  intros; red; intros. unfold call_regs. destruct l. auto.
+  intros; red; intros. unfold call_regs. destruct l.
+  destruct (is_callee_save r || param_reg sg r); auto. red; auto.
   destruct sl.
   red; auto.
   change (Loc.type (S Incoming pos ty)) with (Loc.type (S Outgoing pos ty)). auto.
@@ -148,6 +154,16 @@ Proof.
   intros; red; intros.
   unfold return_regs. destruct l.
 - destruct (is_callee_save r); auto.
+- destruct sl; auto; red; auto.
+Qed.
+
+Lemma wt_return_regs_res:
+  forall sg caller callee,
+  wt_locset caller -> wt_locset callee -> wt_locset (return_regs_res sg caller callee).
+Proof.
+  intros; red; intros.
+  unfold return_regs_res. destruct l.
+- destruct (is_callee_save r); auto. destruct (result_reg sg r); auto. red; auto.
 - destruct sl; auto; red; auto.
 Qed.
 
@@ -332,6 +348,15 @@ Local Opaque mreg_type.
   apply wt_setreg. eapply Val.has_subtype; eauto.
   destruct a; try discriminate. eapply Mem.load_type; eauto with mem.
   apply wt_undef_regs; auto.
+- (* loadop *)
+  simpl in *; InvBooleans.
+  assert (NM: op <> Omove) by (intro; subst op; discriminate).
+  assert (SUB: subtype (snd (type_of_operation op)) (mreg_type res) = true)
+    by (destruct op; try congruence; assumption).
+  econstructor; eauto.
+  apply wt_setreg. eapply Val.has_subtype; eauto.
+  eapply type_of_operation_sound; eauto.
+  apply wt_undef_regs; auto.
 - (* store *)
   simpl in *; InvBooleans.
   econstructor. eauto. eauto. eauto.
@@ -370,7 +395,7 @@ Local Opaque mreg_type.
 - (* return *)
   simpl in *. InvBooleans.
   econstructor; eauto.
-  apply wt_return_regs; auto. apply wt_parent_locset; auto.
+  apply wt_return_regs_res; auto. apply wt_parent_locset; auto.
   red; simpl; intros. destruct l; simpl in *. rewrite H0; auto. destruct sl; auto; congruence.
   red; simpl; intros. auto.
 - (* internal function *)

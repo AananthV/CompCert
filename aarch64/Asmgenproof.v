@@ -719,6 +719,11 @@ Local Transparent destroyed_by_op.
   split. eapply agree_set_undef_mreg; eauto. congruence.
   simpl; congruence.
 
+- (* Mloadop: not generated for this target *)
+  exfalso. inv AT.
+  match goal with [ H: transl_code _ (Mloadop _ _ _ _ _ :: _) _ = OK _ |- _ ] =>
+    simpl in H; monadInv H end.
+
 - (* Mstore *)
   assert (Op.eval_addressing tge sp addr (map rs args) = Some a).
   { rewrite <- H. apply eval_addressing_preserved. exact symbols_preserved. }
