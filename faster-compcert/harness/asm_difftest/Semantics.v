@@ -9,7 +9,7 @@
 
 From Coq Require Import ZArith.
 From compcert Require Import Coqlib Integers Floats Values Memory Globalenvs AST.
-From compcert Require Import Asm.
+From compcert Require Import Asm Builtins.
 
 Definition dummy_ge : genv := Genv.empty_genv fundef unit nil.
 Definition dummy_fn : function := mkfunction signature_main nil.
@@ -64,3 +64,51 @@ Definition int64_of_Z (z: Z) : int64 := Int64.repr z.
 Definition Z_of_int64 (n: int64) : Z := Int64.unsigned n.
 Definition int_of_Z (z: Z) : int := Int.repr z.
 Definition Z_of_int (n: int) : Z := Int.unsigned n.
+
+(** * Register-only instructions (issues #10 and #11)
+
+  [run_regs i inits r] executes the single instruction [i] from the
+  register state where the registers of [inits] hold the given values
+  (and all others are [Vundef]), with an empty memory, and returns the
+  final value of register [r] ([None] if the semantics is stuck).
+  The instruction is built by the OCaml driver ([check_regs.ml]) with
+  the extracted constructors of [Asm.instruction]. *)
+
+Definition run_regs (i: instruction) (inits: list (preg * val)) (r: preg) : option val :=
+  let rs := fold_left (fun rs pv => rs # (fst pv) <- (snd pv)) inits (Pregmap.init Vundef) in
+  match exec_instr dummy_ge dummy_fn i rs Mem.empty with
+  | Next rs' _ => Some (rs' r)
+  | Stuck => None
+  end.
+
+(** [sqrtsd] is produced by [Asmexpand] from the builtin [__builtin_fsqrt]
+  ([Psqrtsd] itself is [Stuck] in [exec_instr], as are all instructions
+  produced by the expander).  Its semantics is that of the builtin. *)
+
+Definition sem_fsqrt (v: val) : option val :=
+  builtin_function_sem (BI_standard BI_fsqrt) (v :: nil).
+
+(** Values from and to unsigned integers (bit patterns). *)
+
+Definition vint (z: Z) : val := Vint (Int.repr z).
+Definition vlong (z: Z) : val := Vlong (Int64.repr z).
+Definition vfloat_bits (z: Z) : val := Vfloat (Float.of_bits (Int64.repr z)).
+Definition vsingle_bits (z: Z) : val := Vsingle (Float32.of_bits (Int.repr z)).
+
+Inductive res : Type :=
+  | RUndef
+  | RInt (z: Z)        (**r [Vint]: unsigned 32 bits *)
+  | RLong (z: Z)       (**r [Vlong]: unsigned 64 bits *)
+  | RFloat (z: Z)      (**r [Vfloat]: its 64 bits *)
+  | RSingle (z: Z)     (**r [Vsingle]: its 32 bits *)
+  | RPtr.
+
+Definition res_of_val (v: val) : res :=
+  match v with
+  | Vundef => RUndef
+  | Vint n => RInt (Int.unsigned n)
+  | Vlong n => RLong (Int64.unsigned n)
+  | Vfloat f => RFloat (Int64.unsigned (Float.to_bits f))
+  | Vsingle f => RSingle (Int.unsigned (Float32.to_bits f))
+  | Vptr _ _ => RPtr
+  end.

@@ -48,9 +48,28 @@ payloads, denormals, and integer edge values. There were 0 mismatches.
 Also remove `backend/Loadop*.v`, `*/LoadopOp.v`, `Mloadop`/`Lloadop`, and the
 `-fload-op` flag.
 
-## Pending retroactive review
+## Pending retroactive review (#10)
 
-[#10](https://github.com/AananthV/CompCert/issues/10): the zero-extending
-shift and mask instructions `Pshrlzx_ri`/`Pandlzx_ri`/`Psallzx_ri`, and
-xor-zeroing in the printer and expander, merged in round 1 before this protocol
-existed. The differential-test harness above can now check them.
+These changes were merged in round 1, before this protocol existed. They
+await owner approval:
+
+1. `x86/Asm.v`: `Pshrlzx_ri`, `Pandlzx_ri` and `Psallzx_ri`, with semantics
+   `rs#rd <- Val.longofintu (Val.shru/and/shl rs#rd (Vint n))` and flags
+   undefined. They are printed as plain `shrl`/`andl`/`sall` on the 32-bit
+   register.
+2. `x86/TargetPrinter.ml` and `x86/Asmexpand.ml`: `xorps`/`xorpd dst,dst`
+   before `cvtsi2sd/ss(q)` (always), before `cvtss2sd`/`cvtsd2ss` (when
+   dst ≠ src), and before the `sqrtsd` expansion (when dst ≠ src).
+
+**Evidence** (`harness/asm_difftest/`, groups `zx` and `cvt`, extracted
+semantics, about 20,000 tests per instruction, two seeds):
+- There are 0 mismatches wherever the model is defined. The full 64-bit
+  result was compared: the hardware zeroed the upper 32 bits in every test,
+  even for an effective shift count of 0.
+- For the conversion and `sqrtsd` sequences:
+  - the low lane matches the modelled single instruction;
+  - no other register and no flag changes;
+  - the upper lanes are zeroed by the xor.
+- Inputs the compiler never produces (a `Vlong` operand for a 32-bit operation,
+  `Vundef`, …) give `Vundef` in the model, which places no constraint on the
+  hardware.
