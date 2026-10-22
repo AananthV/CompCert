@@ -178,8 +178,235 @@ let place_latches f joins blocks =
              | None -> [blk] in
       entry :: List.concat_map place others
 
+(* Placement of loop exits and of conditional updates.
+
+   The order computed above follows the source code, so a block that
+   leaves a loop from the middle of its body (e.g. [break] or [return]
+   inside the loop, or the "found" case of a search loop) is placed
+   between blocks of the loop.  Consider a block [C] of a loop that ends
+   with a conditional branch to such an exit [X], placed just after [C],
+   and to a block [Y] of the loop, placed after [X] with only blocks
+   outside the loop in between.  The path that stays in the loop must
+   branch over [X]: each iteration executes one more taken branch than
+   necessary, and the loop is spread over more cache lines, which makes
+   its speed depend on its alignment.
+
+   Following the classical "loop exit" heuristic of static branch
+   prediction, we assume that the edge that stays in the loop is more
+   frequent than the edge that leaves it, and we move the blocks from
+   [X] to [Y] (excluded) after the loop, so that [C] falls through into
+   [Y].  An exit then costs one more taken branch, but an iteration one
+   less.
+
+   Second, consider a block [C] of a loop that ends with a conditional
+   branch to a block [J] or to a block [M] that only contains moves and
+   branches to [J], where [J] starts with a store of a register [r] that
+   [C] has loaded from the same address, and [M] assigns [r].  This is a
+   conditional update [a[i] = c ? a[i] : e], e.g. a minimum or maximum
+   relaxation, and the store is silent on the edge from [C] to [J].  We
+   assume that, as usual for such updates, the value is more often kept
+   than changed, and make the edge from [C] to [J] the fall-through by
+   moving [M] after the loop.  Without this rule, which of the two
+   edges falls through depends on which of the two moves of
+   [a[i] = c ? a[i] : e] the register allocator happened to coalesce. *)
+
+let rec last_elt = function
+  | [x] -> x
+  | _ :: l -> last_elt l
+  | [] -> assert false
+
+let block_code f blk =
+  List.concat_map (fun pc ->
+    match PTree.get pc f.fn_code with Some b -> b | None -> []) blk
+
+let block_succs f blk =
+  match PTree.get (last_elt blk) f.fn_code with
+  | Some b -> successors_block b
+  | None -> []
+
+(* Natural loops of the graph of blocks [a] (given by the successors of
+   each block), merged by header, outermost first *)
+
+let block_loops succs entry =
+  let nb = Array.length succs in
+  let preds = Array.make nb [] in
+  Array.iteri (fun k l -> List.iter (fun s -> preds.(s) <- k :: preds.(s)) l) succs;
+  let visited = Array.make nb false and post = ref [] in
+  let rec dfs k =
+    if not visited.(k) then begin
+      visited.(k) <- true; List.iter dfs succs.(k); post := k :: !post
+    end in
+  dfs entry;
+  let rpo = Array.of_list !post in
+  let num = Array.make nb (-1) in
+  Array.iteri (fun i k -> num.(k) <- i) rpo;
+  (* Dominators, as in Cooper, Harvey and Kennedy, "A simple, fast
+     dominance algorithm" *)
+  let idom = Array.make nb (-1) in
+  idom.(entry) <- entry;
+  let rec inter x y =
+    if x = y then x
+    else if num.(x) > num.(y) then inter idom.(x) y
+    else inter x idom.(y) in
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    Array.iter (fun k ->
+      if k <> entry then begin
+        let d = List.fold_left (fun acc p ->
+          if idom.(p) < 0 then acc else if acc < 0 then p else inter p acc)
+          (-1) preds.(k) in
+        if idom.(k) <> d then begin idom.(k) <- d; changed := true end
+      end) rpo
+  done;
+  let rec dominates h k =
+    k = h || (k <> entry && idom.(k) >= 0 && dominates h idom.(k)) in
+  let bodies = Hashtbl.create 7 in
+  Array.iter (fun u ->
+    List.iter (fun h ->
+      if dominates h u then begin
+        let body =
+          match Hashtbl.find_opt bodies h with
+          | Some b -> b
+          | None -> let b = Array.make nb false in Hashtbl.add bodies h b; b in
+        body.(h) <- true;
+        let stack = ref [u] in
+        while !stack <> [] do
+          let x = List.hd !stack in
+          stack := List.tl !stack;
+          if not body.(x) then begin
+            body.(x) <- true;
+            List.iter (fun p -> if num.(p) >= 0 then stack := p :: !stack) preds.(x)
+          end
+        done
+      end) succs.(u))
+    rpo;
+  let size b = Array.fold_left (fun c x -> if x then c + 1 else c) 0 b in
+  List.stable_sort (fun b1 b2 -> compare (size b2) (size b1))
+    (Hashtbl.fold (fun h b acc -> (h, b) :: acc) bodies []
+     |> List.sort (fun (h1, _) (h2, _) -> compare h1 h2) |> List.map snd)
+
+let place_exits f blocks =
+  let a = Array.of_list blocks in
+  let nb = Array.length a in
+  let index = Hashtbl.create nb in
+  Array.iteri (fun k blk -> Hashtbl.replace index (P.to_int (List.hd blk)) k) a;
+  let block_of s = Hashtbl.find_opt index (P.to_int s) in
+  let succs = Array.map (fun blk -> List.filter_map block_of (block_succs f blk)) a in
+  let entry =
+    match block_of f.fn_entrypoint with Some k -> k | None -> 0 in
+  let loops = block_loops succs entry in
+  let code = Array.map (block_code f) a in
+  (* Does block [k] fall through into block [k']? *)
+  let falls_into k k' =
+    match code.(k) with
+    | [] -> false
+    | l -> (match last_elt l with
+            | Lbranch s -> block_of s = Some k'
+            | Lcond (_, _, s1, s2) -> block_of s1 = Some k' || block_of s2 = Some k'
+            | _ -> false) in
+  (* Insert the blocks [moved] in [order] after the first block at or
+     after position [p] that does not fall through into its successor *)
+  let insert_after order p moved =
+    let n = Array.length order in
+    let rec find q =
+      if q >= n - 1 || not (falls_into order.(q) order.(q + 1)) then q
+      else find (q + 1) in
+    let q = find p in
+    Array.concat [Array.sub order 0 (q + 1); Array.of_list moved;
+                  Array.sub order (q + 1) (n - q - 1)] in
+  let last_pos order body =
+    let p = ref 0 in
+    Array.iteri (fun i k -> if body.(k) then p := i) order; !p in
+  (* Loop exits: a block [C] of a loop [L] that ends with a conditional
+     branch to a block [X] outside [L] and to a block [Y] of [L], where
+     [X] and the following blocks up to [Y] are not in [L] *)
+  let order = ref (Array.init nb (fun k -> k)) in
+  let innermost_with k k' =
+    List.fold_left (fun acc b -> if b.(k) && b.(k') then Some b else acc) None loops in
+  let pos = Array.make nb 0 in
+  let update_pos () = Array.iteri (fun i k -> pos.(k) <- i) !order in
+  update_pos ();
+  for c = 0 to nb - 1 do
+    match code.(c), succs.(c) with
+    | (_ :: _ as l), [k1; k2] when (match last_elt l with Lcond _ -> true | _ -> false) ->
+        List.iter (fun (x, y) ->
+          match innermost_with c y with
+          | Some body when not body.(x) && pos.(x) = pos.(c) + 1 && pos.(y) > pos.(x) ->
+              let run = Array.to_list (Array.sub !order pos.(x) (pos.(y) - pos.(x))) in
+              if List.for_all (fun k -> not body.(k) && k <> entry) run then begin
+                let kept = Array.of_list
+                    (List.filter (fun k -> not (List.mem k run)) (Array.to_list !order)) in
+                order := insert_after kept (last_pos kept body) run;
+                update_pos ()
+              end
+          | _ -> ()) [(k1, k2); (k2, k1)]
+    | _ -> ()
+  done;
+  (* Conditional updates *)
+  let npreds = Array.make nb 0 in
+  Array.iter (List.iter (fun s -> npreds.(s) <- npreds.(s) + 1)) succs;
+  let innermost k = List.fold_left (fun acc b -> if b.(k) then Some b else acc) None loops in
+  (* [j] starts with a store of [r] at the address that the end of [c]
+     loads into [r] *)
+  let silent_store c j =
+    match code.(j) with
+    | Lstore (chunk, addr, args, src) :: _ ->
+        let loads = function
+          | Lload (chunk', addr', args', dst) ->
+              dst = src && chunk' = chunk && Op.eq_addressing addr' addr
+              && args' = args && not (List.mem dst args)
+          | _ -> false in
+        let preserves = function
+          | Lop (_, _, r) | Lload (_, _, _, r) | Lgetstack (_, _, _, r) ->
+              r <> src && not (List.mem r args)
+          | Lbranch _ | Lcond _ -> true
+          | _ -> false in
+        let rec after = function
+          | [] -> None
+          | i :: rest ->
+              match after rest with
+              | Some l -> Some l
+              | None -> if loads i then Some rest else None in
+        (match after code.(c) with
+         | Some rest -> List.for_all preserves rest
+         | None -> false)
+    | _ -> false in
+  (* [m] only contains moves, one of which assigns the register stored
+     by [j], and branches to [j] *)
+  let update m j =
+    let rec moves = function
+      | [Lbranch s] -> block_of s = Some j
+      | Lop (Op.Omove, _, _) :: rest -> moves rest
+      | _ -> false in
+    match code.(j) with
+    | Lstore (_, _, _, src) :: _ ->
+        moves code.(m)
+        && List.exists (function Lop (Op.Omove, _, r) -> r = src | _ -> false) code.(m)
+    | _ -> false in
+  update_pos ();
+  let out = ref [] in
+  Array.iteri (fun c _ ->
+    match code.(c) with
+    | [] -> ()
+    | l ->
+        match last_elt l, succs.(c), innermost c with
+        | Lcond _, [k1; k2], Some _ ->
+            List.iter (fun (m, j) ->
+              if m <> j && m <> entry && npreds.(m) = 1
+                 && pos.(m) = pos.(c) + 1 && pos.(j) = pos.(m) + 1
+                 && update m j && silent_store c j
+              then out := m :: !out) [(k1, k2); (k2, k1)]
+        | _ -> ()) a;
+  List.iter (fun m ->
+    let kept = Array.of_list (List.filter (fun k -> k <> m) (Array.to_list !order)) in
+    match innermost m with
+    | Some body -> order := insert_after kept (last_pos kept body) [m]
+    | None -> ()) !out;
+  List.map (fun k -> a.(k)) (Array.to_list !order)
+
 (* Build the enumeration *)
 
 let enumerate_aux f reach =
   let joins = join_points f in
-  List.flatten (place_latches f joins (sort_blocks (basic_blocks f joins)))
+  List.flatten (place_exits f (place_latches f joins (sort_blocks (basic_blocks f joins))))
