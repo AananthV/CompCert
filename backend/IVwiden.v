@@ -97,12 +97,23 @@ Definition check_function (f: function) (ghosts: list (node * instruction))
   && forallb (check_node fm) (PTree.elements tc)
   && (match facts_at fm f.(fn_entrypoint) with nil => true | _ => false end).
 
-Definition transf_function (f: function) : function :=
-  let '(ghosts, redir, hints, fm) := iv_oracle f in
+Definition transf_function_hints (f: function) (ghosts: list (node * instruction))
+                                 (redir: PTree.t (list (node * node))) (hints: PTree.t hint)
+                                 (fm: PTree.t (list fact)) : function :=
   let tc := transf_code f ghosts redir hints in
   if check_function f ghosts redir hints fm tc then
     mkfunction f.(fn_sig) f.(fn_params) f.(fn_stacksize) tc f.(fn_entrypoint)
   else f.
+
+(** If the oracle proposes no new instruction and no rewriting, the code is
+  not rebuilt nor checked. *)
+
+Definition transf_function (f: function) : function :=
+  let '(ghosts, redir, hints, fm) := iv_oracle f in
+  match ghosts, PTree.elements hints with
+  | nil, nil => f
+  | _, _ => transf_function_hints f ghosts redir hints fm
+  end.
 
 Definition transf_fundef (fd: fundef) : fundef :=
   AST.transf_fundef transf_function fd.

@@ -24,7 +24,7 @@ let max_copied = 3
 let rotate_oracle f =
   let g = LICMaux.build_cfg f in
   let n = g.LICMaux.n and instr = g.LICMaux.instr in
-  let loops = LICMaux.natural_loops g in
+  let loops = fst (LICMaux.natural_loops_nodes g) in
   let in_chain = Array.make n false in
   let next_pc = ref n in
   (* For each rotated loop: header, body, and list of (original, copy) *)
@@ -43,16 +43,16 @@ let rotate_oracle f =
      starts at a join point other than the header.  Rotation is then
      useless, and often harmful: the latch block would end with a
      conditional branch and no longer be eligible for this placement. *)
-  let latch_placed h body =
-    Array.exists (fun x -> x) (Array.mapi (fun x succ ->
-      body.(x) && g.LICMaux.visited.(x) && List.mem h succ
+  let latch_placed h nodes =
+    Array.exists (fun x ->
+      g.LICMaux.visited.(x) && List.mem h g.LICMaux.succs.(x)
       && (match instr.(x) with
           | Some (Icond _ | Ijumptable _) -> false
           | _ -> true)
       && (let b = block_start h x in b <> h && npreds.(b) >= 2))
-      g.LICMaux.succs) in
-  List.iter (fun (h, body) ->
-    if not (latch_placed h body) then
+      nodes in
+  List.iter (fun (h, body, bnodes) ->
+    if not (latch_placed h bnodes) then
     let rec chain x acc cnt =
       if in_chain.(x) || List.length acc > 2 * max_copied then None else
       match instr.(x) with
@@ -83,11 +83,11 @@ let rotate_oracle f =
     let test_assigned_by_move nodes =
       match instr.(List.nth nodes (List.length nodes - 1)) with
       | Some (Icond (_, args, _, _)) ->
-          Array.exists (fun x -> x) (Array.mapi (fun x b ->
-            b && not (List.mem x nodes)
+          Array.exists (fun x ->
+            not (List.mem x nodes)
             && (match instr.(x) with
                 | Some (Iop (Omove, _, d, _)) -> List.mem d args
-                | _ -> false)) body)
+                | _ -> false)) bnodes
       | _ -> false in
     match chain h [] 0 with
     | None -> ()
@@ -101,12 +101,14 @@ let rotate_oracle f =
     loops;
   if !rotated = [] then (PTree.empty, f.fn_entrypoint) else begin
     (* Redirect the edge [x -> s], where [x] is (a copy of) an original node *)
+    let by_header = Hashtbl.create 7 in
+    List.iter (fun ((h, _, _) as l) -> Hashtbl.add by_header h l) (List.rev !rotated);
     let redirect x s =
       let s = P.to_int s in
       let r =
         List.find_map (fun (h, body, copies) ->
           if h = s && body.(x) then Some (snd (List.hd copies)) else None)
-          !rotated in
+          (Hashtbl.find_all by_header s) in
       P.of_int (match r with Some c -> c | None -> s) in
     let info = ref PTree.empty in
     Array.iteri (fun x i ->

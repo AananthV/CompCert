@@ -1098,7 +1098,25 @@ Qed.
 Lemma transf_function_tr:
   forall f, exists redir hints fm, tr_function f redir hints fm (transf_function f).
 Proof.
-  intros. unfold transf_function. destruct (iv_oracle f) as [[[ghosts redir] hints] fm].
+  intros.
+  assert (ID: exists redir hints fm, tr_function f redir hints fm f).
+  { exists (PTree.empty _), (PTree.empty _), (PTree.empty _).
+    constructor; [reflexivity | reflexivity | reflexivity | reflexivity | | | | | ].
+    + intros n i CODE. rewrite CODE. f_equal. unfold transf_instr.
+      rewrite PTree.gempty.
+      assert (RW: rewrite_instr None i = i) by (destruct i; reflexivity).
+      rewrite RW. symmetry. apply map_succ_id.
+      intros s. unfold redirect. rewrite PTree.gempty. auto.
+    + intros n i s CODE SUCC. exists O. unfold redirect. rewrite PTree.gempty. simpl.
+      destruct (peq s s); congruence.
+    + intros n i h CODE HINT. rewrite PTree.gempty in HINT. discriminate.
+    + intros. apply check_node_empty.
+    + unfold facts_at. rewrite PTree.gempty. auto. }
+  assert (H: forall ghosts (rd: PTree.t (list (node * node))) (hn: PTree.t hint) (fm0: PTree.t (list fact)),
+             exists redir hints fm, tr_function f redir hints fm (transf_function_hints f ghosts rd hn fm0)).
+  2: { unfold transf_function. destruct (iv_oracle f) as [[[ghosts redir] hints] fm].
+       destruct ghosts; [destruct (PTree.elements hints) | ]; first [exact ID | apply H]. }
+  intros ghosts redir hints fm. unfold transf_function_hints.
   set (tc := transf_code f ghosts redir hints).
   destruct (check_function f ghosts redir hints fm tc) eqn:C.
 - exists redir, hints, fm. unfold check_function in C.
