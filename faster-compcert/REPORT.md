@@ -888,3 +888,46 @@ These and gramschmidt (§8) are tracked together in #20.
 round 2. Bisecting with `-fno-*` flags points at **Loadfwd**: with
 `-fno-loadfwd` it takes 8.9 s and 132 MB. This is tracked in #19 and fixed
 next.
+
+---
+
+## 10. Fix: Loadfwd compile-time and memory blow-up (issue #19)
+
+**Root cause.** The analysis recorded an expression fact ("r = op(args)") for
+every operation result. CompCert's RTL rarely reuses registers, so these facts
+were never killed, and the fact set grew linearly along straight-line code.
+On the 4,220-node main function of a truncated `layout.c` there were about
+1,200 facts per program point. In addition, `kill_reg`/`kill_loads` rebuilt
+the whole map at every instruction, so the maps at different program points
+shared no structure. Both time and memory were therefore quadratic, and this
+happened in each of the three analysis runs.
+
+**Fix.**
+- Expression facts are now kept only for *relevant* registers: address
+  arguments of loads and stores, and transitively, up to depth 8, the
+  arguments of the operations that define them. Load facts are always kept.
+- A size guard skips the analysis on functions where
+  #instructions × #relevant registers exceeds 2·10⁷.
+- Both changes only remove facts, which is trivially sound. The lattice and
+  Kildall proofs are unchanged; the transfer lemmas take the relevance set as
+  a parameter.
+- Load/store locations are computed once per function, and the second
+  analysis is skipped when there is no candidate.
+- Generated code is unchanged: identical assembly on all 101 files of
+  `test/c`, raytracer, compression and spass, and on the 30 PolyBench kernels.
+
+**New check.** `harness/compile_cost.py` measures compile time and peak memory
+on `test/abi/layout.c`, `staticlayout.c`, spass and `test/c`, under a memory
+cap. Results are in `results/compile-cost.json`.
+
+| target | CompCert 3.18 | master before fix | after fix |
+|---|---:|---:|---:|
+| layout.c | 4.0 s / 126 MB | 367 s / 65 GB | 11.2 s / 112 MB |
+| staticlayout.c | 2.5 s / 74 MB | 66.8 s / 9.8 GB | 4.4 s / 65 MB |
+| spass (51 files) | 30.0 s / 47 MB | 61.0 s / 270 MB | 52.8 s / 90 MB |
+| test/c (24 files) | 1.5 s / 20 MB | 2.2 s / 28 MB | 2.0 s / 24 MB |
+
+Memory is back to CompCert 3.18 levels. Compile *time* is still 1.3-2.8×
+CompCert 3.18. The remaining cost is spread over the other new passes (on
+layout.c, IVwiden, LICM and Looprot take 1.6-1.8 s each), and is tracked in
+#9.
