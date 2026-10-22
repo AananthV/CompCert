@@ -931,3 +931,49 @@ Memory is back to CompCert 3.18 levels. Compile *time* is still 1.3-2.8×
 CompCert 3.18. The remaining cost is spread over the other new passes (on
 layout.c, IVwiden, LICM and Looprot take 1.6-1.8 s each), and is tracked in
 #9.
+
+---
+
+## 11. Small regressions (issue #20)
+
+We re-examined the regressions reported in §8 and §9, each by `-fno-*`
+ablation, assembly diffs and padding sweeps.
+
+| program | finding | outcome |
+|---|---|---|
+| floyd-warshall (+4.6%) | **Real.** In `path[i][j] = path[i][j] < s ? path[i][j] : s`, the register allocator's coalescing tie-break made the common "keep" arm a taken branch: two taken branches per iteration. | Fixed by a new layout rule. 0.177 → 0.146 s (−17.5%), better than with IVwiden disabled (0.168 s). |
+| raytracer (+2.7%) | **Code placement.** Inserting 8-56 bytes of padding between object files moves run time by ±2.5-4% for both builds. Averaged over paddings, IVwiden is 0.6% faster. | A general loop-exit layout rule: 0.823 → 0.794 s (−3.5%). |
+| symm (+3.2%) | **Noise.** Its assembly is identical to master's. | No change. |
+| gramschmidt (+2.7%) | **Unexplained.** DRAM-bound; identical binaries vary by 0.88-1.12× between sessions. | No change. |
+| jacobi-1d | No regression (10.1 vs 10.2 ms). | No change. |
+
+**The two layout rules** are in `backend/Linearizeaux.ml`, the unverified
+oracle behind Linearize, whose proof accepts any block order.
+- **Conditional update.** Take a loop block that loads `r` from an address,
+  whose successor stores `r` back to the same address, with an alternative
+  path through a moves-only block that assigns `r`. Then the path that
+  leaves memory unchanged (e.g. a min/max relaxation that does not fire) is
+  laid out as the fall-through. This fires in floyd-warshall and in one spass
+  function.
+- **Loop exit.** When a loop block falls through into an exit block and its
+  in-loop successor follows right after, the exit run is moved after the
+  loop.
+
+**Results** (same session vs master):
+
+| measure | result |
+|---|---:|
+| `test/c` geomean | 1.005 (no program > 2%) |
+| big geomean | 0.991 |
+| PolyBench geomean | 0.990 |
+| spass compile time | 59.3 → 52.9 s |
+
+Proofs and axioms are unchanged, and 154 tests pass.
+
+**A lesson about measurement.** In the same verification run, symm measured
+**+7.5%** and gramschmidt **−7%**, although both compile to *byte-identical*
+assembly. That is run-to-run noise on this shared machine, for memory-bound
+kernels. From now on, a timing difference is only attributed to a change if
+the program's assembly differs. Differences of a few percent elsewhere in
+this report (the §8/§9 regressions in particular) should be read with that in
+mind.
