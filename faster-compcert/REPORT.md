@@ -1102,3 +1102,48 @@ Two caveats on these numbers:
   is within this machine's noise for memory-bound kernels (§11).
 - The big programs (pointer-heavy and call-heavy code) remain the least
   improved.
+
+---
+
+## 16. First trusted-base change: x86 arithmetic with memory operands (issue #5)
+
+This is the first change made under the trusted-base protocol (#1). The
+owner approved the proposal on #5, and the ledger is in
+[TRUSTED_BASE.md](TRUSTED_BASE.md).
+
+**Trusted part.** Eight new Asm instructions (`addsd/subsd/mulsd/divsd m64`,
+`addl/xorl/andl/orl m32`), their semantics, and their printing. They are
+exactly the approved text. A new differential test, `harness/asm_difftest/`,
+runs each instruction on the CPU and compares it bit for bit with the
+*extracted* Coq semantics: about 120k cases per instruction, 0 mismatches.
+
+**Verified part.** A new Linear pass, `Loadop` (`-fload-op`, off by default):
+- It fuses `Lload … t; Lop op [rd; t] rd` into `Lloadop` when `t` is dead.
+  Liveness is checked during the transformation.
+- It runs on Linear because in Mach and Asm, changing code changes the
+  return-address offsets that are stored in memory.
+- `Loadopproof.v` is 782 lines.
+
+**A design change outside the trusted base.** Linear let callees read any
+register at entry, and callers read any register after a return. That made
+nearly every candidate unsafe: nbody had 1 fusion instead of 9.
+- The LTL and Linear semantics now leave caller-save registers undefined at
+  function entry (except parameters) and at return (except the result).
+  Register allocation never relied on them.
+- Allocation, Tunneling, Linearize, Stacking and Debugvar are re-proved.
+- Mach, Asm and the end-to-end theorem are unchanged.
+- Code generated without `-fload-op` is byte-identical to before.
+
+**Results with `-fload-op`** (same session):
+- My re-run: nbody −4.1%, spectral −3.4%, aes −0.6%.
+- The author's runs: gemm −9%, lu −8%, symm −5%.
+- Regressions: syrk +8% and heat-3d +4%. syrk is a code-placement effect:
+  with the loop aligned, the fused version is faster.
+- Suite geomeans move by less than 1%.
+- Compile time is unchanged.
+
+**Limitations.**
+- Only adjacent load/operation pairs are fused. Another 55 candidates have
+  one instruction in between, including gemm's `A[i][k]`.
+- Commuted operands and accumulators (`t = load; t = t + x`) are not
+  handled.
