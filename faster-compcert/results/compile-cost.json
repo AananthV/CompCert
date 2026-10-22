@@ -1,0 +1,38 @@
+{
+ "ccomp-3.18": {
+  "layout": {
+   "time": 4.01,
+   "rss_mb": 125.5
+  },
+  "staticlayout": {
+   "time": 2.541,
+   "rss_mb": 74.5
+  },
+  "spass": {
+   "time": 30.04,
+   "rss_mb": 47.0
+  },
+  "testc": {
+   "time": 1.478,
+   "rss_mb": 19.5
+  }
+ },
+ "mine": {
+  "layout": {
+   "time": 11.234,
+   "rss_mb": 112.0
+  },
+  "staticlayout": {
+   "time": 4.395,
+   "rss_mb": 65.0
+  },
+  "spass": {
+   "time": 52.84,
+   "rss_mb": 90.5
+  },
+  "testc": {
+   "time": 1.977,
+   "rss_mb": 24.0
+  }
+ }
+}

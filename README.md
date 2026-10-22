@@ -53,7 +53,10 @@ Progress so far:
 - [ ] Load-op memory operands on x86 (nbody, aes).
 - [ ] Opt-in libm builtins (`sqrt`, `floor`) and unaligned 64-bit accesses:
   these need changes to the trusted model.
-- [ ] Reduce the extra compile time (+47% on `test/c`).
+- [x] Fix the Loadfwd compile-time/memory blow-up on large functions (65 GB →
+  112 MB on `test/abi/layout.c`; [#19](https://github.com/AananthV/CompCert/issues/19)).
+- [ ] Reduce the remaining compile-time overhead (1.3–2.8× CompCert 3.18;
+  [#9](https://github.com/AananthV/CompCert/issues/9)).
 
 All changes keep CompCert's end-to-end correctness theorem. They add no
 axioms: the only new assumptions are command-line flags and validated

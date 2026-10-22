@@ -9,6 +9,7 @@ Compopts.generate_float_constants
 Compopts.optim_CSE
 Compopts.optim_constprop
 Compopts.optim_for_size
+Compopts.optim_ivwiden
 Compopts.optim_licm
 Compopts.optim_loadfwd
 Compopts.optim_looprot
@@ -22,6 +23,7 @@ Events.external_functions_sem
 Events.inline_assembly_properties
 Events.inline_assembly_sem
 FunctionalExtensionality.functional_extensionality_dep
+IVwiden.iv_oracle
 Inlining.inlining_analysis
 Inlining.inlining_info
 Inlining.should_inline

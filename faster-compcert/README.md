@@ -56,6 +56,9 @@ Known gaps and next steps are in [REPORT.md, section 5](REPORT.md#5-what-remains
 - `harness/show.py`: prints `bench.py` JSON files side by side, with the
   geomean.
 - `harness/ablate.sh`: leave-one-out ablation of GCC pass families.
+- `harness/compile_cost.py`: compile time and peak memory on large inputs
+  (`test/abi/layout.c`, `staticlayout.c`, spass, `test/c`), under a memory
+  cap, to catch compile-time blow-ups.
 - `harness/asmstats.py`: static statistics of one function, old vs. new `.s`.
 - `harness/check_axioms.sh`: lists the assumptions of the end-to-end
   correctness theorems.
