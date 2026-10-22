@@ -1037,3 +1037,45 @@ gain (44.5 vs 44.7 ms).
 
 **Remaining Tier 2 parts of #6.** Zero-extending byte loads and byte-field
 extraction need new Asm instructions. They are moved to #25.
+
+---
+
+## 14. Compile time (issue #9, first round)
+
+All changes keep the generated code **byte-identical**: the agent checked 133
+files (test/c, raytracer, spass, compression, PolyBench, layout tests), and
+I re-checked 17 of them.
+
+**Fixes.**
+- **LICM oracle:** a constant-time dominance test. The old test walked up
+  the dominator tree, which was quadratic on large functions: 4.7 s of
+  layout.c's 11 s.
+- **LICM, Looprot and IVwiden oracles:** per-loop instead of
+  per-function work, memoised CFG/loop/type information, and liveness by
+  worklist.
+- **LICM and IVwiden:** return the function unchanged when the oracle
+  proposes nothing. This needs no new proof, because the existing
+  identity case covers it.
+- **Loadfwd:** the two passes are fused, with a proof that the fusion equals
+  their composition (`fwd_program_eq`). The relevant registers are computed
+  once, and `kill_reg` avoids rebuilding maps, justified by a new invariant
+  `facts_ok` proved with `DS.fixpoint_invariant`.
+
+**Compile cost** (`harness/compile_cost.py`, my re-run, one session):
+
+| target | CompCert 3.18 | before | after |
+|---|---:|---:|---:|
+| layout.c | 4.9 s | 11.6 s | **6.5 s** |
+| staticlayout.c | 2.9 s | 4.5 s | **3.8 s** |
+| spass | 31.3 s | 54.8 s | **46.4 s** |
+| test/c | 1.54 s | 2.00 s | 1.98 s |
+
+**What remains.** spass is still about 1.5× CompCert 3.18. The remaining time
+is Loadfwd (6.7 s), the second Constprop (~3 s), extra Renumber runs and
+larger functions after inlining.
+- Skipping the second Constprop when inlining round 2 did nothing is
+  **not exact**: it changes 23 files, because Constprop is not idempotent.
+- Loadfwd's second analysis cannot be skipped exactly, because its `lub`
+  depends on iteration order.
+
+#9 stays open for these.

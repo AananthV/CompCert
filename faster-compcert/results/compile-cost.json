@@ -1,38 +1,56 @@
 {
  "ccomp-3.18": {
   "layout": {
-   "time": 4.01,
+   "time": 4.889,
    "rss_mb": 125.5
   },
   "staticlayout": {
-   "time": 2.541,
+   "time": 2.877,
    "rss_mb": 74.5
   },
   "spass": {
-   "time": 30.04,
-   "rss_mb": 47.0
+   "time": 31.271,
+   "rss_mb": 57.5
   },
   "testc": {
-   "time": 1.478,
+   "time": 1.544,
    "rss_mb": 19.5
+  }
+ },
+ "master": {
+  "layout": {
+   "time": 11.642,
+   "rss_mb": 108.5
+  },
+  "staticlayout": {
+   "time": 4.499,
+   "rss_mb": 65.0
+  },
+  "spass": {
+   "time": 54.831,
+   "rss_mb": 90.5
+  },
+  "testc": {
+   "time": 2.0,
+   "rss_mb": 24.0
   }
  },
  "mine": {
   "layout": {
-   "time": 11.234,
-   "rss_mb": 112.0
+   "time": 6.529,
+   "rss_mb": 109.0
   },
   "staticlayout": {
-   "time": 4.395,
-   "rss_mb": 65.0
+   "time": 3.769,
+   "rss_mb": 72.0
   },
   "spass": {
-   "time": 52.84,
-   "rss_mb": 90.5
+   "time": 46.382,
+   "rss_mb": 80.0
   },
   "testc": {
-   "time": 1.977,
-   "rss_mb": 24.0
+   "time": 1.98,
+   "rss_mb": 21.5
   }
  }
 }
