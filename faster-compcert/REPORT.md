@@ -977,3 +977,41 @@ kernels. From now on, a timing difference is only attributed to a change if
 the program's assembly differs. Differences of a few percent elsewhere in
 this report (the §8/§9 regressions in particular) should be read with that in
 mind.
+
+---
+
+## 12. Register-pressure-aware CSE and live-range splitting (issue #7): not merged
+
+Two ideas were implemented, fully proved or validated, and measured. Neither
+paid for its cost, so neither is merged. The code is kept on branch
+`issue-7-cse-pressure` for reference.
+
+1. **A register-pressure estimate in CSE**, replacing the fixed cap of 8 on
+   loads kept by the disjoint-offset check.
+   - **How:** liveness plus RTL types, with partial keeping of the oldest
+     candidates. Soundness holds because keeping any subset is sound.
+   - **Result:** no measurable gain. sha3 measured 25.9 vs 26.2 ms, which is
+     within noise.
+   - **Why:** sha3's Theta step has about 10 live registers and 24
+     candidates, so the estimate keeps the same 5 as the old cap. Keeping
+     more spills; gcc -O2 also spills here (46 `%rsp` references in
+     `keccakf`).
+   - **Cost:** about 4% compile time on spass (liveness), and ~280 lines of
+     proof.
+2. **Live-range splitting around call-free loops**, in the unverified part
+   of register allocation, which the Allocation validator checks.
+   - **How:** a variable is a candidate if it is spilled, live across a call,
+     and used but not defined in the loop. It gets a copy at the loop entry,
+     its uses inside the loop are renamed, and allocation is redone.
+   - **Result:** fftsp −2.2% (all 6 reloads of `cc1/ss1/cc3` leave the inner
+     loop) and nbody −0.9%. All other programs are unchanged.
+   - **Cost:** **+5.7% compile time on spass**, from the second allocation.
+
+**Lessons.**
+- At this point the remaining gap is not in CSE precision or spill
+  placement.
+- **Compile time has become a cost that every new change must justify**
+  (#9).
+- **Found along the way:** 64-bit rotates by 1 are not recognised. sha3
+  compiles `ROTL64(x,1)` to `lea/mov/shr/or`, 5 times per round. This is an
+  instruction-selection fix, added to #6.
