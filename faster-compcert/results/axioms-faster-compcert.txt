@@ -16,6 +16,7 @@ Compopts.optim_loadop
 Compopts.optim_looprot
 Compopts.optim_redundancy
 Compopts.optim_shiftmask
+Compopts.optim_tailacc
 Compopts.optim_tailcalls
 Compopts.propagate_float_constants
 Compopts.va_strict
@@ -26,6 +27,7 @@ Events.inline_assembly_properties
 Events.inline_assembly_sem
 FunctionalExtensionality.functional_extensionality_dep
 IVwiden.iv_oracle
+Inlining.inline_fuel
 Inlining.inlining_analysis
 Inlining.inlining_info
 Inlining.should_inline

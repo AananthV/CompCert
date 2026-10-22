@@ -1174,3 +1174,36 @@ exact text were checked character for character against the proposal.
   are gone. It runs **−6.3%** (interleaved timing, 94.1 → 88.2 ms).
 - 154 tests pass with and without the flag.
 - Proofs check on all six targets.
+## 18. Accumulator tail recursion and recursive inlining (issue #8)
+
+**What was added.**
+- **`Tailacc`**, a new RTL pass (`-ftail-acc`). It turns
+  `return f(args) op y`, with `op` an int/long `+ * & | ^`, into a loop
+  carrying an accumulator. The generated loop is validated by a verified
+  checker.
+  - The proof, `Tailaccproof.v` (1,431 lines), uses a memory injection
+    that maps the stack blocks of all pending recursive frames to the loop's
+    single frame.
+  - It relies on associativity and commutativity of the integer operations,
+    which is why the transformation does not apply to floats.
+- **Bounded recursive inlining.** Inlining carries a fuel per function, and
+  the depth is chosen by an oracle, `inline_fuel`, that cannot affect
+  correctness. Only functions with a single recursive call site qualify; the
+  default depth is 3.
+
+**Results.**
+- **fib: 0.54×** the previous time (quiet session). It goes from 2.35× to
+  1.26× gcc-O2-ccmodel. A re-run on a loaded machine gave 0.70×.
+- **Narrow reach:** only 5 of 59 programs change code (fib, lists, chomp,
+  spass's `fol_Depth`, lzw), and only fib changes measurably. A scan of all
+  the RTL found just two candidates for accumulator recursion. The others fail
+  because of `-` (binarytrees) or a load after the call (raytracer).
+- **No cost:** compile time and memory are unchanged, and `.text` grows by
+  0.5% on `test/c`.
+
+**Assessment.** This item was ranked last on the roadmap after the held-out
+evaluation (§7), and the result confirms that. The `test/c` geomean improves
+by about 2.7%, almost entirely from one 20-line microbenchmark, and the
+held-out suites do not move. It was merged because it costs nothing at compile
+time and has no regressions. It should not be counted as evidence of general
+progress.
