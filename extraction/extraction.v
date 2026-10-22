@@ -100,10 +100,13 @@ Extract Constant Compopts.optim_CSE =>
   "fun _ -> !Clflags.option_fcse".
 Extract Constant Looprot.rotate_oracle => "Looprotaux.rotate_oracle".
 Extract Constant LICM.licm_oracle => "LICMaux.licm_oracle".
+Extract Constant IVwiden.iv_oracle => "IVwidenaux.iv_oracle".
 Extract Constant Compopts.optim_looprot =>
   "fun _ -> !Clflags.option_flooprotate".
 Extract Constant Compopts.optim_licm =>
   "fun _ -> !Clflags.option_flicm".
+Extract Constant Compopts.optim_ivwiden =>
+  "fun _ -> !Clflags.option_fivwiden".
 Extract Constant Compopts.optim_loadfwd =>
   "fun _ -> !Clflags.option_floadfwd".
 Extract Constant Compopts.optim_redundancy =>
@@ -166,6 +169,10 @@ Separate Extraction
    Conventions1.dummy_int_reg Conventions1.dummy_float_reg
    Conventions1.allocatable_registers
    RTL.instr_defs RTL.instr_uses
+   IVop.mk_sext IVop.mk_addlimm IVop.mk_mullimm IVop.mk_addl
+   IVop.mk_cmpl IVop.mk_cmplimm IVop.shift_addr IVop.rebase_addr IVop.addr_base_index
+   IVdomain.transf_instr IVdomain.transfer IVdomain.transfer_cond
+   IVdomain.gen_op IVdomain.fresh_for IVdomain.implied IVdomain.hint_ok
    Machregs.mregs_for_operation Machregs.mregs_for_builtin
    Machregs.two_address_op Machregs.is_stack_reg
    Machregs.destroyed_at_indirect_call

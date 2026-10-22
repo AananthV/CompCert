@@ -203,6 +203,7 @@ BACKEND=\
   Renumber.v Renumberproof.v \
   Looprot.v Looprotproof.v \
   LICMop.v LICM.v LICMproof.v \
+  IVop.v IVdomain.v IVwiden.v IVwidenproof.v \
   RTLtyping.v \
   Kildall.v Liveness.v \
   ValueDomain.v ValueAOp.v ValueAnalysis.v \
