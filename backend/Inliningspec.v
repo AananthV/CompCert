@@ -339,15 +339,22 @@ with tr_funbody: context -> function -> code -> Prop :=
 Definition fenv_agree (fe: funenv) : Prop :=
   forall id f, fe!id = Some f -> fenv!id = Some f.
 
+Lemma callee_env_agree:
+  forall fe id, fenv_agree (fst fe) -> fenv_agree (fst (callee_env fe id)).
+Proof.
+  unfold callee_env; intros. destruct (snd fe); simpl; auto.
+  red; intros. rewrite PTree.grspec in H0. destruct (PTree.elt_eq id0 id); try discriminate. auto.
+Qed.
+
 Section EXPAND_INSTR.
 
-Variable fe: funenv.
-Hypothesis FE: fenv_agree fe.
+Variable fe: fuelenv.
+Hypothesis FE: fenv_agree (fst fe).
 
-Variable rec: forall fe', (size_fenv fe' < size_fenv fe)%nat -> context -> function -> mon unit.
+Variable rec: forall fe', (size_fuelenv fe' < size_fuelenv fe)%nat -> context -> function -> mon unit.
 
 Hypothesis rec_unchanged:
-  forall fe' (L: (size_fenv fe' < size_fenv fe)%nat) ctx f s x s' i pc,
+  forall fe' (L: (size_fuelenv fe' < size_fuelenv fe)%nat) ctx f s x s' i pc,
   rec fe' L ctx f s = R x s' i ->
   Ple ctx.(dpc) s.(st_nextnode) ->
   Plt pc ctx.(dpc) ->
@@ -446,9 +453,9 @@ Proof.
 Qed.
 
 Hypothesis rec_spec:
-  forall fe' (L: (size_fenv fe' < size_fenv fe)%nat) ctx f s x s' i c,
+  forall fe' (L: (size_fuelenv fe' < size_fuelenv fe)%nat) ctx f s x s' i c,
   rec fe' L ctx f s = R x s' i ->
-  fenv_agree fe' ->
+  fenv_agree (fst fe') ->
   Ple (ctx.(dpc) + max_pc_function f) s.(st_nextnode) ->
   ctx.(mreg) = max_reg_function f ->
   Ple (Pos.add ctx.(dreg) ctx.(mreg)) s.(st_nextreg) ->
@@ -497,7 +504,7 @@ Proof.
     intros. rewrite S1. eapply set_instr_other; eauto. unfold node; extlia.
     extlia. extlia.
   eapply rec_spec; eauto.
-    red; intros. rewrite PTree.grspec in H. destruct (PTree.elt_eq id0 id); try discriminate. auto.
+    apply callee_env_agree; auto.
     simpl. subst s2; simpl in *; extlia.
     simpl. subst s3; simpl in *; extlia.
     simpl. extlia.
@@ -527,7 +534,7 @@ Proof.
   eapply add_moves_spec; eauto.
     intros. rewrite S1. eapply set_instr_other; eauto. unfold node; extlia. extlia. extlia.
   eapply rec_spec; eauto.
-    red; intros. rewrite PTree.grspec in H. destruct (PTree.elt_eq id0 id); try discriminate. auto.
+    apply callee_env_agree; auto.
     simpl. subst s3; simpl in *. subst s2; simpl in *. extlia.
     simpl. subst s3; simpl in *; extlia.
     simpl. extlia.
@@ -643,7 +650,7 @@ Lemma expand_cfg_unchanged:
   Plt pc ctx.(dpc) ->
   s'.(st_code)!pc = s.(st_code)!pc.
 Proof.
-  intros fe0; pattern fe0. apply well_founded_ind with (R := ltof _ size_fenv).
+  intros fe0; pattern fe0. apply well_founded_ind with (R := ltof _ size_fuelenv).
   apply well_founded_ltof.
   intros. unfold expand_cfg in H0. rewrite unroll_Fixm in H0.
   eapply expand_cfg_rec_unchanged; eauto. assumption.
@@ -652,7 +659,7 @@ Qed.
 Lemma expand_cfg_spec:
   forall fe ctx f s x s' i c,
   expand_cfg fe ctx f s = R x s' i ->
-  fenv_agree fe ->
+  fenv_agree (fst fe) ->
   Ple (ctx.(dpc) + max_pc_function f) s.(st_nextnode) ->
   ctx.(mreg) = max_reg_function f ->
   Ple (ctx.(dreg) + ctx.(mreg)) s.(st_nextreg) ->
@@ -664,7 +671,7 @@ Lemma expand_cfg_spec:
   (forall pc', Ple ctx.(dpc) pc' -> Plt pc' s'.(st_nextnode) -> c!pc' = s'.(st_code)!pc') ->
   tr_funbody ctx f c.
 Proof.
-  intros fe0; pattern fe0. apply well_founded_ind with (R := ltof _ size_fenv).
+  intros fe0; pattern fe0. apply well_founded_ind with (R := ltof _ size_fuelenv).
   apply well_founded_ltof.
   intros. unfold expand_cfg in H0. rewrite unroll_Fixm in H0.
   eapply expand_cfg_rec_spec; eauto.
@@ -705,14 +712,14 @@ Lemma transf_function_spec:
 Proof.
   intros. unfold transf_function in H.
   set (fenv := funenv_program round cunit) in *.
-  destruct (expand_function fenv f initstate) as [ctx s i] eqn:?.
+  destruct (expand_function fenv (inline_fuel fenv f) f initstate) as [ctx s i] eqn:?.
   destruct (zlt (st_stksize s) Ptrofs.max_unsigned); inv H.
   monadInv Heqr. set (ctx := initcontext x x0 (max_reg_function f) (fn_stacksize f)) in *.
 Opaque initstate.
   destruct INCR3. inversion EQ1. inversion EQ.
   apply tr_function_intro with fenv ctx; auto.
   apply funenv_program_compat.
-  eapply expand_cfg_spec with (fe := fenv); eauto.
+  eapply expand_cfg_spec with (fe := (fenv, inline_fuel fenv f)); eauto.
     red; auto.
     unfold ctx; rewrite <- H1; rewrite <- H2; rewrite <- H3; simpl. extlia.
     unfold ctx; rewrite <- H0; rewrite <- H1; simpl. extlia.

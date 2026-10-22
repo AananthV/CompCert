@@ -69,6 +69,7 @@ Extraction Inline RTLgen.ret RTLgen.error RTLgen.bind RTLgen.bind2.
 
 (* Inlining *)
 Extract Inlined Constant Inlining.should_inline => "Inliningaux.should_inline".
+Extract Inlined Constant Inlining.inline_fuel => "Inliningaux.inline_fuel".
 Extract Inlined Constant Inlining.inlining_info => "Inliningaux.inlining_info".
 Extract Inlined Constant Inlining.inlining_analysis => "Inliningaux.inlining_analysis".
 Extraction Inline Inlining.ret Inlining.bind.
@@ -94,6 +95,8 @@ Extract Constant Compopts.generate_float_constants =>
   "fun _ -> !Clflags.option_ffloatconstprop >= 2".
 Extract Constant Compopts.optim_tailcalls =>
   "fun _ -> !Clflags.option_ftailcalls".
+Extract Constant Compopts.optim_tailacc =>
+  "fun _ -> !Clflags.option_ftailacc".
 Extract Constant Compopts.optim_constprop =>
   "fun _ -> !Clflags.option_fconstprop".
 Extract Constant Compopts.optim_CSE =>

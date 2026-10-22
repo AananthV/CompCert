@@ -17,3 +17,5 @@ type inlining_info
 val inlining_analysis: Datatypes.nat -> RTL.program -> inlining_info
 
 val should_inline: inlining_info -> AST.ident -> RTL.coq_function -> bool
+
+val inline_fuel: RTL.coq_function Maps.PTree.t -> RTL.coq_function -> Datatypes.nat
