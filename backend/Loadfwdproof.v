@@ -202,20 +202,24 @@ Qed.
 (** Soundness of the transfer function, instruction by instruction. *)
 
 Lemma transfer_op_sound:
-  forall rs m mp op (args: list reg) (res: reg) v,
+  forall rel rs m mp op (args: list reg) (res: reg) v,
   facts_hold ge sp rs m mp ->
   eval_operation ge sp op rs##args m = Some v ->
-  facts_hold ge sp (rs#res <- v) m (transfer_op op args res mp).
+  facts_hold ge sp (rs#res <- v) m (transfer_op rel op args res mp).
 Proof.
   intros. unfold transfer_op.
   destruct (is_move_operation op args) as [src|] eqn:MV.
 - exploit is_move_operation_correct; eauto. intros [? ?]; subst op args.
   simpl in H0. inv H0.
-  assert (DFL: facts_hold ge sp (rs#res <- (rs#src)) m (set_fact res (Fexpr (Sreg src)) mp)).
-  { apply set_fact_sound; [auto | reflexivity]. }
+  assert (DFL: facts_hold ge sp (rs#res <- (rs#src)) m
+                 (match rel!res with
+                  | Some _ => set_fact res (Fexpr (Sreg src)) mp
+                  | None => kill_reg res mp end)).
+  { destruct (rel!res). apply set_fact_sound; [auto | reflexivity]. apply kill_reg_sound; auto. }
   destruct (mp!src) as [[e|chunk addr el]|] eqn:E; auto.
   apply set_fact_sound; auto. rewrite <- fact_holds_v_eq. apply H; auto.
-- destruct (op_depends_on_memory op) eqn:DM.
+- destruct (rel!res). 2: apply kill_reg_sound; auto.
+  destruct (op_depends_on_memory op) eqn:DM.
   apply kill_reg_sound; auto.
   apply set_fact_sound; auto. simpl.
   rewrite sregs_sound. rewrite <- H0. apply op_depends_on_memory_correct; auto.
@@ -242,11 +246,11 @@ Proof.
 Qed.
 
 Lemma transfer_store_sound:
-  forall rs m mp chunk addr args src s a m',
+  forall rel rs m mp chunk addr args src s a m',
   facts_hold ge sp rs m mp ->
   eval_addressing ge sp addr rs##args = Some a ->
   Mem.storev chunk m a rs#src = Some m' ->
-  facts_hold ge sp rs m' (transfer_instr (Istore chunk addr args src s) mp).
+  facts_hold ge sp rs m' (transfer_instr rel (Istore chunk addr args src s) mp).
 Proof.
   intros. simpl.
   assert (K: facts_hold ge sp rs m' (kill_loads mp)) by (eapply kill_loads_sound; eauto).
@@ -323,10 +327,13 @@ Lemma analyze_entry:
   lholds ge sp rs m (analyze f)!!(fn_entrypoint f).
 Proof.
   intros. unfold analyze.
-  destruct (DS.fixpoint (fn_code f) successors_instr (transfer f) (fn_entrypoint f) empty_facts) as [res|] eqn:FIX.
-- apply lholds_ge with empty_facts. eapply DS.fixpoint_entry; eauto.
+  assert (E: lholds ge sp rs m (PMap.init empty_facts)!!(fn_entrypoint f)).
+  { rewrite PMap.gi. simpl; red; intros. rewrite PTree.gempty in H; discriminate. }
+  destruct (too_big f (relevant_regs (fn_code f))); auto.
+  destruct (DS.fixpoint (fn_code f) successors_instr (transfer (relevant_regs (fn_code f)) f)
+                        (fn_entrypoint f) empty_facts) as [res|] eqn:FIX; auto.
+  apply lholds_ge with empty_facts. eapply DS.fixpoint_entry; eauto.
   simpl; red; intros. rewrite PTree.gempty in H; discriminate.
-- rewrite PMap.gi. simpl; red; intros. rewrite PTree.gempty in H; discriminate.
 Qed.
 
 Lemma analyze_succ:
@@ -334,16 +341,21 @@ Lemma analyze_succ:
   (fn_code f)!pc = Some i ->
   In s (successors_instr i) ->
   lholds ge sp rs m (analyze f)!!pc ->
-  (forall mp, facts_hold ge sp rs m mp -> facts_hold ge sp rs' m' (transfer_instr i mp)) ->
+  (forall rel mp, facts_hold ge sp rs m mp -> facts_hold ge sp rs' m' (transfer_instr rel i mp)) ->
   lholds ge sp rs' m' (analyze f)!!s.
 Proof.
   intros. destruct ((analyze f)!!pc) as [|mp] eqn:A; simpl in H1; try contradiction.
-  apply lholds_ge with (transfer f pc (analyze f)!!pc).
-- unfold analyze in *.
-  destruct (DS.fixpoint (fn_code f) successors_instr (transfer f) (fn_entrypoint f) empty_facts) as [res|] eqn:FIX.
-  + eapply DS.fixpoint_solution; eauto. intros; reflexivity.
-  + rewrite PMap.gi. destruct (transfer f pc (PMap.init empty_facts) !! pc); simpl; auto.
-    intros. red; intros. rewrite PTree.gempty in H4; discriminate.
+  set (rel := relevant_regs (fn_code f)).
+  apply lholds_ge with (transfer rel f pc (analyze f)!!pc).
+- assert (INIT: LFacts.ge (PMap.init empty_facts)!!s (transfer rel f pc (analyze f)!!pc)).
+  { rewrite PMap.gi. destruct (transfer rel f pc (analyze f)!!pc); simpl; auto.
+    intros. red; intros. rewrite PTree.gempty in H4; discriminate. }
+  unfold analyze at 1. fold rel.
+  destruct (too_big f rel) eqn:TB; auto.
+  destruct (DS.fixpoint (fn_code f) successors_instr (transfer rel f) (fn_entrypoint f) empty_facts) as [res|] eqn:FIX; auto.
+  replace (analyze f) with res.
+  eapply DS.fixpoint_solution; eauto. intros; reflexivity.
+  unfold analyze. fold rel. rewrite TB, FIX; auto.
 - rewrite A. unfold transfer. rewrite H. simpl. auto.
 Qed.
 
@@ -495,8 +507,8 @@ Proof.
   apply set_reg_lessdef; auto.
 
 - (* Iload *)
-  assert (TR: forall mp, facts_hold ge sp rs m mp ->
-              facts_hold ge sp (rs#dst <- v) m (transfer_instr (Iload chunk addr args dst pc') mp)).
+  assert (TR: forall rel mp, facts_hold ge sp rs m mp ->
+              facts_hold ge sp (rs#dst <- v) m (transfer_instr rel (Iload chunk addr args dst pc') mp)).
   { intros; simpl. eapply transfer_load_sound; eauto. }
   destruct ((analyze f)!!pc) as [|mp] eqn:AP; simpl in SAT; try contradiction.
   destruct (find_load mp chunk addr args) as [r|] eqn:FL.
