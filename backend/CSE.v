@@ -18,6 +18,7 @@ Require Import AST Linking Builtins.
 Require Import Values Memory Events.
 Require Import Op Registers RTL.
 Require Import ValueDomain ValueAnalysis CSEdomain CombineOp.
+Require Compopts.
 
 (** The idea behind value numbering algorithms is to associate
   abstract identifiers (``value numbers'') to the contents of registers
@@ -362,7 +363,8 @@ Definition filter_after_store_addr (n: numbering) (p: aptr) (sz: Z)
   can cause spilling, as in [x = a[0] ^ ... ^ a[4]; a[0] ^= x; ...; a[4] ^= x]
   where all loads would remain available after the first store.
   As a heuristic, the additional syntactic disjointness check is used only
-  if it preserves at most [max_same_base_loads] load equations. *)
+  if it preserves at most [max_same_base_loads] load equations.
+  Option [-fno-cse-offsets] turns it off. *)
 
 Definition max_same_base_loads : nat := 8%nat.
 
@@ -377,6 +379,7 @@ Definition count_same_base_loads (n: numbering)
 
 Definition same_base_valnums (n: numbering) (addr: addressing) (args: list reg) (sz: Z)
                              : option (list valnum) :=
+  if negb (Compopts.optim_cse_offsets tt) then None else
   match find_valnum_regs n args with
   | Some vl0 =>
       if Nat.leb (count_same_base_loads n addr vl0 sz n.(num_eqs)) max_same_base_loads

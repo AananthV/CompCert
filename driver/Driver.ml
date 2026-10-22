@@ -194,6 +194,8 @@ Processing options:
   -ffloat-const-prop <n>  Control constant propagation of floats
                    (<n>=0: none, <n>=1: limited, <n>=2: full; default is full)
   -fcse          Perform common subexpression elimination [on]
+  -fcse-offsets  In CSE, keep loads across stores at nearby addresses [on]
+  -fsplit-loops  Split live ranges of spilled variables around loops [on]
   -floop-rotate  Perform loop rotation [on]
   -flicm         Perform loop-invariant code motion [on]
   -fiv-widen     Perform induction-variable widening [on]
@@ -257,7 +259,7 @@ let dump_mnemonics destfile =
 let optimization_options = [
   option_ftailcalls; option_fifconversion; option_fconstprop; option_fcse;
   option_floadfwd; option_fredundancy; option_flooprotate; option_flicm;
-  option_fivwiden;
+  option_fivwiden; option_fcseoffsets; option_fsplitloops;
   option_finline; option_finline_functions_called_once;
   option_finline_small_functions;
 ]
@@ -393,6 +395,8 @@ let cmdline_actions =
   @ f_opt "if-conversion" option_fifconversion
   @ f_opt "const-prop" option_fconstprop
   @ f_opt "cse" option_fcse
+  @ f_opt "cse-offsets" option_fcseoffsets
+  @ f_opt "split-loops" option_fsplitloops
   @ f_opt "loadfwd" option_floadfwd
   @ f_opt "loop-rotate" option_flooprotate
   @ f_opt "licm" option_flicm

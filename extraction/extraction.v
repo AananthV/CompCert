@@ -107,6 +107,8 @@ Extract Constant Compopts.optim_licm =>
   "fun _ -> !Clflags.option_flicm".
 Extract Constant Compopts.optim_ivwiden =>
   "fun _ -> !Clflags.option_fivwiden".
+Extract Constant Compopts.optim_cse_offsets =>
+  "fun _ -> !Clflags.option_fcseoffsets".
 Extract Constant Compopts.optim_loadfwd =>
   "fun _ -> !Clflags.option_floadfwd".
 Extract Constant Compopts.optim_redundancy =>

@@ -36,6 +36,9 @@ Parameter optim_constprop: unit -> bool.
 (** Flag -fcse.  For common subexpression elimination. *)
 Parameter optim_CSE: unit -> bool.
 
+(** Flag -fcse-offsets.  For CSE across stores at nearby addresses. *)
+Parameter optim_cse_offsets: unit -> bool.
+
 (** Flag -floadfwd.  For global load forwarding. *)
 Parameter optim_loadfwd: unit -> bool.
 

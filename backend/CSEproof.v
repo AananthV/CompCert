@@ -676,7 +676,8 @@ Proof.
   eauto with va.
 + destruct (same_base_valnums n addr args (size_chunk chunk)) as [vl0|] eqn:SB; [|discriminate].
   assert (FV: find_valnum_regs n args = Some vl0).
-  { unfold same_base_valnums in SB. destruct (find_valnum_regs n args); [|discriminate].
+  { unfold same_base_valnums in SB. destruct (negb _); [discriminate|].
+    destruct (find_valnum_regs n args); [|discriminate].
     destruct (Nat.leb _ _); congruence. }
   erewrite find_valnum_regs_sound in H0 by eauto.
   exploit same_base_disjoint_sound; eauto. intros [A B]. subst b0.

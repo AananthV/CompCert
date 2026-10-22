@@ -599,6 +599,263 @@ let spill_costs f =
   get_stats
 
 
+(********* Live range splitting around call-free loops **************)
+
+(* A variable that is live across a call must be allocated to a
+   callee-save register or spilled.  If it is spilled, it is reloaded
+   at every use, including inside loops that contain no calls.
+   To avoid this, after a first allocation, for each maximal loop that
+   contains no calls, the variables that were spilled, are live across a
+   call somewhere in the function, are used in the loop and are not
+   defined in the loop, are copied into fresh variables on entry to the
+   loop, and their uses in the loop are renamed; then registers are
+   allocated again.  The copies are not live across any call, so they can
+   be allocated to caller-save registers, and the spilled variable is
+   reloaded once per entry in the loop instead of at every use.
+   This is done only if the number of variables live in the loop that
+   are not spilled, plus the copies, fits in the available registers.
+   The copy [Xmove(v, v')] must not be coalesced: this is ensured by not
+   recording a preference for it, and by making [v'] interfere with
+   the variables live after it.  The result is checked by the validator
+   in [Allocation], like any other allocation.  Option [-fno-split-loops]
+   turns this off. *)
+
+let split_dsts : (var, unit) Hashtbl.t = Hashtbl.create 17
+
+let instr_uses_x = function
+  | Xmove(src, _) | Xreload(src, _) | Xspill(src, _) -> [src]
+  | Xparmove(srcs, _, _, _) -> srcs
+  | Xop(_, args, _) -> args
+  | Xload(_, _, args, _) -> args
+  | Xstore(_, _, args, src) -> src :: args
+  | Xcall(_, Coq_inl v, args, _) -> v :: args
+  | Xcall(_, Coq_inr _, args, _) -> args
+  | Xtailcall(_, Coq_inl v, args) -> v :: args
+  | Xtailcall(_, Coq_inr _, args) -> args
+  | Xbuiltin(_, args, _) -> params_of_builtin_args args
+  | Xcond(_, args, _, _) -> args
+  | Xjumptable(arg, _) -> [arg]
+  | Xreturn args -> args
+  | Xbranch _ -> []
+
+let instr_defs_x = function
+  | Xmove(_, dst) | Xreload(_, dst) | Xspill(_, dst) -> [dst]
+  | Xparmove(_, dsts, itmp, ftmp) -> itmp :: ftmp :: dsts
+  | Xop(_, _, res) | Xload(_, _, _, res) -> [res]
+  | Xcall(_, _, _, res) -> res
+  | Xbuiltin(_, _, res) -> params_of_builtin_res res
+  | _ -> []
+
+let is_call_instr = function
+  | Xcall _ | Xtailcall _ -> true
+  | Xbuiltin((EF_external _ | EF_runtime _ | EF_malloc | EF_free
+             | EF_inline_asm _), _, _) -> true
+  | _ -> false
+
+let rename_uses m instr =
+  let r v = match Hashtbl.find_opt m v with Some v' -> v' | None -> v in
+  let rl = List.map r in
+  let rros = function Coq_inl v -> Coq_inl (r v) | ros -> ros in
+  match instr with
+  | Xmove(src, dst) -> Xmove(r src, dst)
+  | Xreload(src, dst) -> Xreload(r src, dst)
+  | Xspill(src, dst) -> Xspill(r src, dst)
+  | Xparmove(srcs, dsts, itmp, ftmp) -> Xparmove(rl srcs, dsts, itmp, ftmp)
+  | Xop(op, args, res) -> Xop(op, rl args, res)
+  | Xload(chunk, addr, args, dst) -> Xload(chunk, addr, rl args, dst)
+  | Xstore(chunk, addr, args, src) -> Xstore(chunk, addr, rl args, r src)
+  | Xcall(sg, ros, args, res) -> Xcall(sg, rros ros, rl args, res)
+  | Xtailcall(sg, ros, args) -> Xtailcall(sg, rros ros, rl args)
+  | Xbuiltin(ef, args, res) -> Xbuiltin(ef, List.map (AST.map_builtin_arg r) args, res)
+  | Xcond(cond, args, s1, s2) -> Xcond(cond, rl args, s1, s2)
+  | Xjumptable(arg, tbl) -> Xjumptable(r arg, tbl)
+  | Xreturn args -> Xreturn (rl args)
+  | Xbranch s -> Xbranch s
+
+(* Natural loops of an XTL function, as (header, body) pairs, where
+   the body is a set of block indices in reverse postorder. *)
+
+type xloops = {
+  rpo: P.t array;                 (* reachable blocks in reverse postorder *)
+  index: (P.t, int) Hashtbl.t;    (* position in [rpo] *)
+  loops: (int * bool array) list  (* header, body *)
+}
+
+let find_loops f =
+  let index = Hashtbl.create 97 in
+  let order = ref [] in
+  let succs pc =
+    match PTree.get pc f.fn_code with
+    | Some blk -> successors_block blk
+    | None -> [] in
+  let visited = Hashtbl.create 97 in
+  (* iterative DFS producing postorder *)
+  let stack = ref [(f.fn_entrypoint, succs f.fn_entrypoint)] in
+  Hashtbl.replace visited f.fn_entrypoint ();
+  while !stack <> [] do
+    match !stack with
+    | (pc, []) :: rest -> order := pc :: !order; stack := rest
+    | (pc, s :: ss) :: rest ->
+        stack := (pc, ss) :: rest;
+        if not (Hashtbl.mem visited s) && PTree.get s f.fn_code <> None then begin
+          Hashtbl.replace visited s ();
+          stack := (s, succs s) :: !stack
+        end
+    | [] -> ()
+  done;
+  let rpo = Array.of_list !order in
+  let n = Array.length rpo in
+  Array.iteri (fun i pc -> Hashtbl.replace index pc i) rpo;
+  let succ_idx = Array.map (fun pc ->
+    List.filter_map (fun s -> Hashtbl.find_opt index s) (succs pc)) rpo in
+  let preds = Array.make n [] in
+  Array.iteri (fun i ss -> List.iter (fun j -> preds.(j) <- i :: preds.(j)) ss) succ_idx;
+  (* Dominators (Cooper, Harvey, Kennedy) *)
+  let idom = Array.make n (-1) in
+  if n > 0 then idom.(0) <- 0;
+  let rec intersect a b =
+    if a = b then a
+    else if a > b then intersect idom.(a) b
+    else intersect a idom.(b) in
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    for i = 1 to n - 1 do
+      let ps = List.filter (fun p -> idom.(p) >= 0) preds.(i) in
+      match ps with
+      | [] -> ()
+      | p :: ps' ->
+          let d = List.fold_left intersect p ps' in
+          if idom.(i) <> d then begin idom.(i) <- d; changed := true end
+    done
+  done;
+  let rec dominates a b =
+    if a = b then true
+    else if b = 0 || idom.(b) < 0 then false
+    else dominates a idom.(b) in
+  let bodies = Hashtbl.create 17 in
+  Array.iteri (fun u ss ->
+    List.iter (fun h ->
+      if dominates h u then begin
+        let body =
+          match Hashtbl.find_opt bodies h with
+          | Some b -> b
+          | None -> let b = Array.make n false in b.(h) <- true; Hashtbl.add bodies h b; b in
+        let rec mark x =
+          if not body.(x) then begin
+            body.(x) <- true; List.iter mark preds.(x)
+          end in
+        mark u
+      end) ss) succ_idx;
+  { rpo; index;
+    loops = Hashtbl.fold (fun h b acc -> (h, b) :: acc) bodies [] }
+
+let count_true a = Array.fold_left (fun c b -> if b then c + 1 else c) 0 a
+
+(* Limits on the number of live variables of each class in a loop,
+   after splitting (x86-64 has 15 allocatable integer registers and 16
+   floating-point registers). *)
+
+let max_split_int = 13
+let max_split_float = 15
+
+let split_around_loops f liveness spilled =
+  if not !option_fsplitloops then f else begin
+  let xl = find_loops f in
+  let block i = match PTree.get xl.rpo.(i) f.fn_code with Some b -> b | None -> [] in
+  (* Variables live across a call *)
+  let across = ref VSet.empty in
+  PTree.fold (fun () pc blk ->
+    let rec walk = function
+      | [] -> PMap.get pc liveness
+      | i :: rest ->
+          let after = walk rest in
+          if is_call_instr i then
+            across := VSet.union !across (vset_removelist (instr_defs_x i) after);
+          live_before i after in
+    ignore (walk blk)) f.fn_code ();
+  let across = VSet.filter (function V _ -> true | L _ -> false)
+                 (VSet.inter !across spilled) in
+  if VSet.is_empty across then f else begin
+  (* Maximal loops without calls *)
+  let has_call body =
+    let r = ref false in
+    Array.iteri (fun i b -> if b && List.exists is_call_instr (block i) then r := true) body;
+    !r in
+  let loops = List.sort (fun (_, b1) (_, b2) -> compare (count_true b2) (count_true b1)) xl.loops in
+  let selected = ref [] in
+  List.iter (fun (h, body) ->
+    if not (List.exists (fun (_, b) -> b.(h)) !selected) && not (has_call body)
+    then selected := (h, body) :: !selected) loops;
+  let code = ref f.fn_code in
+  List.iter (fun (h, body) ->
+    let uses = ref VSet.empty and defs = ref VSet.empty in
+    Array.iteri (fun i b ->
+      if b then List.iter (fun instr ->
+        uses := List.fold_right VSet.add (instr_uses_x instr) !uses;
+        defs := List.fold_right VSet.add (instr_defs_x instr) !defs) (block i)) body;
+    let cands = VSet.diff (VSet.inter !uses across) !defs in
+    (* Maximal number of live variables of each class in the loop.
+       The copies are live throughout the loop: split the variables of
+       a class only if this does not exceed the number of registers. *)
+    let maxlive = Array.make 2 0 in
+    Array.iteri (fun i b ->
+      if b then begin
+        let count live =
+          let c = Array.make 2 0 in
+          VSet.iter (function
+            | V(_, ty) as v when not (VSet.mem v spilled) ->
+                let k = class_of_type ty in c.(k) <- c.(k) + 1
+            | _ -> ()) live;
+          maxlive.(0) <- max maxlive.(0) c.(0);
+          maxlive.(1) <- max maxlive.(1) c.(1) in
+        let rec walk = function
+          | [] -> let l = PMap.get xl.rpo.(i) liveness in count l; l
+          | instr :: rest ->
+              let l = live_before instr (walk rest) in count l; l in
+        ignore (walk (block i))
+      end) body;
+    let ncands = Array.make 2 0 in
+    VSet.iter (fun v -> let k = class_of_type (typeof v) in ncands.(k) <- ncands.(k) + 1) cands;
+    let fits k = maxlive.(k) + ncands.(k) <= (if k = 0 then max_split_int else max_split_float) in
+    let cands =
+      VSet.filter (fun v ->
+        let k = class_of_type (typeof v) in
+        fits k) cands in
+    if not (VSet.is_empty cands) then begin
+      let m = Hashtbl.create 7 in
+      let moves = VSet.fold (fun v acc ->
+        let v' = new_temp (typeof v) in
+        Hashtbl.add m v v'; Hashtbl.replace split_dsts v' ();
+        Xmove(v, v') :: acc) cands [] in
+      Array.iteri (fun i b ->
+        if b then begin
+          let pc = xl.rpo.(i) in
+          match PTree.get pc !code with
+          | Some blk -> code := PTree.set pc (List.map (rename_uses m) blk) !code
+          | None -> ()
+        end) body;
+      (* Insert the copies at the end of the predecessors of the header
+         that are outside the loop, before the final branch.  Blocks
+         for stores cannot have moves after the store: insert before. *)
+      let hpc = xl.rpo.(h) in
+      Array.iteri (fun i pc ->
+        if not body.(i) then
+          match PTree.get pc !code with
+          | Some blk when List.mem hpc (successors_block blk) ->
+              let blk' =
+                if List.exists (function Xstore _ -> true | _ -> false) blk
+                then moves @ blk
+                else match List.rev blk with
+                     | last :: rrest -> List.rev_append rrest (moves @ [last])
+                     | [] -> blk in
+              code := PTree.set pc blk' !code
+          | _ -> ()) xl.rpo
+    end) !selected;
+  if !code == f.fn_code then f else { f with fn_code = !code }
+  end
+  end
+
 (********* Construction and coloring of the interference graph **************)
 
 let add_interfs_def g res live =
@@ -638,6 +895,8 @@ let rec add_interfs_pairwise g = function
 
 let add_interfs_instr g instr live =
   match instr with
+  | Xmove(src, dst) when Hashtbl.mem split_dsts dst ->
+      add_interfs_def g dst live
   | Xmove(src, dst) | Xspill(src, dst) | Xreload(src, dst) ->
       IRC.add_pref g src dst;
       add_interfs_move g src dst live;
@@ -1152,6 +1411,9 @@ let transl_function fn alloc =
 
 exception Timeout
 
+(* Allocate registers, inserting spill code if needed.  Return the
+   final XTL function, the allocation, and the set of spilled variables. *)
+
 let rec first_round f liveness =
   let alloc = find_coloring f liveness in
   if !option_dalloctrace then begin
@@ -1159,7 +1421,7 @@ let rec first_round f liveness =
     PrintXTL.print_function !pp ~alloc: alloc ~live: liveness f
   end;
   let ts = tospill_function f alloc in
-  if VSet.is_empty ts then success f alloc else more_rounds f ts 1
+  if VSet.is_empty ts then (f, alloc, ts) else more_rounds f ts 1
 
 and more_rounds f ts count =
   if count >= 40 then raise Timeout;
@@ -1172,7 +1434,7 @@ and more_rounds f ts count =
   end;
   let ts' = tospill_function f' alloc in
   if VSet.is_empty ts'
-  then success f' alloc
+  then (f', alloc, ts)
   else begin
     if !option_dalloctrace then begin
       fprintf !pp "--- Remain to be spilled:\n";
@@ -1182,7 +1444,7 @@ and more_rounds f ts count =
     more_rounds f (VSet.union ts ts') (count + 1)
   end
 
-and success f alloc =
+let success (f, alloc, _) =
   let f' = transl_function f alloc in
   if !option_dalloctrace then begin
     fprintf !pp "-------------- Candidate allocation\n\n";
@@ -1190,6 +1452,17 @@ and success f alloc =
   end;
   f'
 
+(* If some variables that are live across calls were spilled, split their
+   live ranges around call-free loops and allocate again. *)
+
+let allocate f liveness =
+  Hashtbl.clear split_dsts;
+  let (_, _, spilled) as res = first_round f liveness in
+  if VSet.is_empty spilled then success res else begin
+    let f' = split_around_loops f liveness spilled in
+    if f' == f then success res
+    else success (first_round f' (liveness_analysis f'))
+  end
 
 let regalloc f =
   init_trace();
@@ -1207,7 +1480,7 @@ let regalloc f =
         PrintXTL.print_function !pp f3
       end;
       try
-        Errors.OK(first_round f3 liveness)
+        Errors.OK(allocate f3 liveness)
       with
       | Timeout ->
           Errors.Error(Errors.msg "spilling fails to converge")
