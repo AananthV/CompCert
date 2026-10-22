@@ -40,6 +40,7 @@ Require Inlining.
 Require Renumber.
 Require Looprot.
 Require LICM.
+Require IVwiden.
 Require Constprop.
 Require Loadfwd.
 Require CSE.
@@ -64,6 +65,7 @@ Require Inliningproof.
 Require Renumberproof.
 Require Looprotproof.
 Require LICMproof.
+Require IVwidenproof.
 Require Constpropproof.
 Require Loadfwdproof.
 Require CSEproof.
@@ -146,6 +148,7 @@ Definition transf_rtl_program (f: RTL.program) : res Asm.program :=
    @@ print (print_RTL 9)
    @@ total_if Compopts.optim_looprot (time "Loop rotation" Looprot.transf_program)
    @@ total_if Compopts.optim_licm (time "Loop-invariant code motion" LICM.transf_program)
+   @@ total_if Compopts.optim_ivwiden (time "Induction-variable widening" IVwiden.transf_program)
    @@ time "Renumbering" Renumber.transf_program
    @@ total_if Compopts.optim_loadfwd (time "Load forwarding (moves)" Loadfwd.insert_program)
    @@ total_if Compopts.optim_loadfwd (time "Load forwarding" Loadfwd.transf_program)
@@ -265,6 +268,7 @@ Definition CompCert's_passes :=
   ::: mkpass (match_if Compopts.optim_constprop Renumberproof.match_prog)
   ::: mkpass (match_if Compopts.optim_looprot Looprotproof.match_prog)
   ::: mkpass (match_if Compopts.optim_licm LICMproof.match_prog)
+  ::: mkpass (match_if Compopts.optim_ivwiden IVwidenproof.match_prog)
   ::: mkpass Renumberproof.match_prog
   ::: mkpass (match_if Compopts.optim_loadfwd Loadfwdproof.match_prog_insert)
   ::: mkpass (match_if Compopts.optim_loadfwd Loadfwdproof.match_prog)
@@ -317,7 +321,8 @@ Proof.
   set (p15 := total_if optim_constprop Renumber.transf_program p14) in *.
   set (p15r := total_if optim_looprot Looprot.transf_program p15) in *.
   set (p15l := total_if optim_licm LICM.transf_program p15r) in *.
-  set (p15n := Renumber.transf_program p15l) in *.
+  set (p15i := total_if optim_ivwiden IVwiden.transf_program p15l) in *.
+  set (p15n := Renumber.transf_program p15i) in *.
   set (p15a := total_if optim_loadfwd Loadfwd.insert_program p15n) in *.
   set (p15b := total_if optim_loadfwd Loadfwd.transf_program p15a) in *.
   destruct (partial_if optim_CSE CSE.transf_program p15b) as [p16|e] eqn:P16; simpl in T; try discriminate.
@@ -347,6 +352,7 @@ Proof.
   exists p15; split. apply total_if_match. apply Renumberproof.transf_program_match.
   exists p15r; split. apply total_if_match. apply Looprotproof.transf_program_match.
   exists p15l; split. apply total_if_match. apply LICMproof.transf_program_match.
+  exists p15i; split. apply total_if_match. apply IVwidenproof.transf_program_match.
   exists p15n; split. apply Renumberproof.transf_program_match.
   exists p15a; split. apply total_if_match. apply Loadfwdproof.insert_program_match.
   exists p15b; split. apply total_if_match. apply Loadfwdproof.transf_program_match.
@@ -410,7 +416,7 @@ Ltac DestructM :=
       destruct H as (p & M & MM)
   end.
   repeat DestructM. subst tp.
-  assert (F: forward_simulation (Cstrategy.semantics p) (Asm.semantics p30)).
+  assert (F: forward_simulation (Cstrategy.semantics p) (Asm.semantics p31)).
   {
   eapply compose_forward_simulations.
     eapply SimplExprproof.transl_program_correct; eassumption.
@@ -445,6 +451,8 @@ Ltac DestructM :=
     eapply match_if_simulation. eassumption. exact Looprotproof.transf_program_correct.
   eapply compose_forward_simulations.
     eapply match_if_simulation. eassumption. exact LICMproof.transf_program_correct.
+  eapply compose_forward_simulations.
+    eapply match_if_simulation. eassumption. exact IVwidenproof.transf_program_correct.
   eapply compose_forward_simulations. eapply Renumberproof.transf_program_correct; eassumption.
   eapply compose_forward_simulations.
     eapply match_if_simulation. eassumption. exact Loadfwdproof.insert_program_correct.

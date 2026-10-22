@@ -45,6 +45,9 @@ Parameter optim_looprot: unit -> bool.
 (** Flag -flicm.  For loop-invariant code motion. *)
 Parameter optim_licm: unit -> bool.
 
+(** Flag -fiv-widen.  For induction-variable widening. *)
+Parameter optim_ivwiden: unit -> bool.
+
 (** Flag -fredundancy.  For dead code elimination. *)
 Parameter optim_redundancy: unit -> bool.
 

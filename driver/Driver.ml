@@ -196,6 +196,7 @@ Processing options:
   -fcse          Perform common subexpression elimination [on]
   -floop-rotate  Perform loop rotation [on]
   -flicm         Perform loop-invariant code motion [on]
+  -fiv-widen     Perform induction-variable widening [on]
   -floadfwd      Perform global forwarding of stored and loaded values [on]
   -fredundancy   Perform redundancy elimination [on]
   -finline       Perform inlining of functions [on]
@@ -256,6 +257,7 @@ let dump_mnemonics destfile =
 let optimization_options = [
   option_ftailcalls; option_fifconversion; option_fconstprop; option_fcse;
   option_floadfwd; option_fredundancy; option_flooprotate; option_flicm;
+  option_fivwiden;
   option_finline; option_finline_functions_called_once;
   option_finline_small_functions;
 ]
@@ -394,6 +396,7 @@ let cmdline_actions =
   @ f_opt "loadfwd" option_floadfwd
   @ f_opt "loop-rotate" option_flooprotate
   @ f_opt "licm" option_flicm
+  @ f_opt "iv-widen" option_fivwiden
   @ f_opt "redundancy" option_fredundancy
   @ f_opt "inline" option_finline
   @ f_opt "inline-functions-called-once" option_finline_functions_called_once
