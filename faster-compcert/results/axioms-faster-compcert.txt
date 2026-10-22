@@ -15,6 +15,7 @@ Compopts.optim_loadfwd
 Compopts.optim_loadop
 Compopts.optim_looprot
 Compopts.optim_redundancy
+Compopts.optim_shiftmask
 Compopts.optim_tailcalls
 Compopts.propagate_float_constants
 Compopts.va_strict

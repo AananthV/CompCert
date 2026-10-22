@@ -57,6 +57,10 @@ Progress so far:
 - [x] Load-op memory operands on x86, opt-in `-fload-op`. This is the first
   approved trusted-base change ([#5](https://github.com/AananthV/CompCert/issues/5),
   [ledger](faster-compcert/TRUSTED_BASE.md)).
+- [x] Model x86 shift-count masking (approved trusted-base change, opt-in
+  `-fshift-mask`; [#11](https://github.com/AananthV/CompCert/issues/11)).
+- [x] Retroactive review of the round-1 trusted-base changes
+  ([#10](https://github.com/AananthV/CompCert/issues/10)).
 - [ ] Opt-in libm builtins (`sqrt`, `floor`) and unaligned 64-bit accesses:
   these need changes to the trusted model.
 - [x] Fix the Loadfwd compile-time/memory blow-up on large functions (65 GB →

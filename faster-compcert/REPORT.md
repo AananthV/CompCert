@@ -1147,3 +1147,30 @@ nearly every candidate unsafe: nbody had 1 fusion instead of 9.
   one instruction in between, including gemm's `A[i][k]`.
 - Commuted operands and accumulators (`t = load; t = t + x`) are not
   handled.
+
+---
+
+## 17. Second trusted-base change: x86 shift-count masking (issue #11)
+
+**Trusted part.** The six variable-count shifts in `x86/Asm.v` now mask their
+count to 5 or 6 bits, as the hardware does (ledger entry 4). The new semantics
+is a strict refinement of the old one, which was undefined for large counts.
+The differential test against the extracted new semantics gives 0 mismatches
+and is defined on 100% of the tests (previously 6-13%). The approval and the
+exact text were checked character for character against the proposal.
+
+**Verified part.**
+- New masked-shift operators, plus a selection rule behind `-fshift-mask`
+  (off by default). It turns `x << (y & 31)`, and the low word of a 64-bit
+  `y & 31`, into the masked operator. The second form is what nsievebits
+  has: `1 << i % NBITS` with a `size_t` `NBITS`.
+- Asmgen emits the plain `%cl` shift.
+- Existing shifts use the refined instructions through a lemma that the masked
+  result is at least as defined as the unmasked one.
+
+**Results.**
+- Without the flag, the generated code is byte-identical on all 136 files.
+- With the flag, only nsievebits changes: both `andq $31,%rcx` instructions
+  are gone. It runs **−6.3%** (interleaved timing, 94.1 → 88.2 ms).
+- 154 tests pass with and without the flag.
+- Proofs check on all six targets.

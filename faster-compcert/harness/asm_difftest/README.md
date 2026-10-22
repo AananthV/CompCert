@@ -11,7 +11,7 @@ semantics extracted to OCaml. The tree must be built (`make proof`).
 | `loadop` | #5    | `Paddd_fm Psubd_fm Pmuld_fm Pdivd_fm Paddl_rm Pxorl_rm Pandl_rm Porl_rm` |
 | `zx`     | #10   | `Psallzx_ri Pshrlzx_ri Pandlzx_ri` |
 | `cvt`    | #10   | `Pcvtsi2sd_fr Pcvtsi2ss_fr Pcvtsl2sd_fr Pcvtsl2ss_fr Pcvtss2sd_ff Pcvtsd2ss_ff`, and `sqrtsd` (from `__builtin_fsqrt`), with the `xorpd`/`xorps` printed before them |
-| `shift`  | #11   | `Psall_rcl Pshrl_rcl Psarl_rcl Psalq_rcl Pshrq_rcl Psarq_rcl`, against both `Asm.v` and the masked semantics proposed in #11 |
+| `shift`  | #11   | `Psall_rcl Pshrl_rcl Psarl_rcl Psalq_rcl Pshrq_rcl Psarq_rcl`, whose count is masked in `Asm.v` since #11 |
 
 For example, `run.sh . 20000 0x1 shift` runs only the shifts.
 The script exits 1 if any group fails. Scratch files go to
@@ -63,10 +63,9 @@ The reference is always the extracted Coq semantics (`Asm.exec_instr`,
     (failure);
   - **undef**: the model gives `Vundef`, so there is no constraint.
 
-  For `shift`, the same is done with `proposed_rcl`, the semantics
-  proposed in #11 (`Val.shl rd (Val.and rcx 31)`, ...). It is written
-  in OCaml from the extracted `Val` operations, and `Asm.v` is not
-  changed.
+  For `shift`, `Asm.v` masks the count since #11
+  (`Val.shl rd (Val.and rcx 31)`, ...), so the model must be defined on
+  every test: an undef result is a failure there.
   A test also fails (`regs` column) if any register other than the
   destination changed. For `cvt`, whose semantics uses `nextinstr`, it
   also fails if a flag changed. The `wrong-kind:undef` column runs the
