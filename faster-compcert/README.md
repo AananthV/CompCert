@@ -33,6 +33,8 @@ Changes, each fully proved:
 | new pass `IVwiden`: induction-variable widening and strength reduction, validated (#4) | `-fiv-widen` | gemm 0.74x, sha1 0.87x, syrk 0.87x |
 | new passes `Looprot` + `LICM`: validated loop rotation and loop-invariant code motion, including chains of dependent operations (#16) | `-floop-rotate`, `-flicm` | aes, sha1, fannkuch; gemm 0.72x, syrk 0.73x, floyd-warshall 0.74x |
 
+| new pass `Loadop`: x86 arithmetic with memory operands (#5; **trusted-base change**, see [TRUSTED_BASE.md](TRUSTED_BASE.md)) | `-fload-op` (off by default) | gemm 0.91x, nbody 0.96x, spectral 0.97x |
+
 Verification:
 
 - No new axioms. The only new entries in `Print Assumptions` are three flags
@@ -45,6 +47,7 @@ Known gaps and next steps are in [REPORT.md, section 5](REPORT.md#5-what-remains
 ## Layout
 
 - `REPORT.md`: the report.
+- `TRUSTED_BASE.md`: the ledger of approved trusted-base changes.
 - `harness/bench.py`: compiles a benchmark suite with several compilers,
   checks each program's result, and times it. Suites (`--suite`):
   - `c`: the 24 programs of `test/c` (default);
@@ -59,6 +62,8 @@ Known gaps and next steps are in [REPORT.md, section 5](REPORT.md#5-what-remains
 - `harness/compile_cost.py`: compile time and peak memory on large inputs
   (`test/abi/layout.c`, `staticlayout.c`, spass, `test/c`), under a memory
   cap, to catch compile-time blow-ups.
+- `harness/asm_difftest/`: differential test of new Asm instruction
+  semantics against the CPU, using the extracted Coq semantics.
 - `harness/asmstats.py`: static statistics of one function, old vs. new `.s`.
 - `harness/check_axioms.sh`: lists the assumptions of the end-to-end
   correctness theorems.

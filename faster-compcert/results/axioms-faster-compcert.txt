@@ -12,6 +12,7 @@ Compopts.optim_for_size
 Compopts.optim_ivwiden
 Compopts.optim_licm
 Compopts.optim_loadfwd
+Compopts.optim_loadop
 Compopts.optim_looprot
 Compopts.optim_redundancy
 Compopts.optim_tailcalls

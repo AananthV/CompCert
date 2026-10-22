@@ -54,7 +54,9 @@ Progress so far:
   (PolyBench 0.845 → 0.776; [#16](https://github.com/AananthV/CompCert/issues/16)).
 - [x] Induction-variable widening and strength reduction (new pass `IVwiden`;
   PolyBench −4.3%, sha1 −13%; [#4](https://github.com/AananthV/CompCert/issues/4)).
-- [ ] Load-op memory operands on x86 (nbody, aes).
+- [x] Load-op memory operands on x86, opt-in `-fload-op`. This is the first
+  approved trusted-base change ([#5](https://github.com/AananthV/CompCert/issues/5),
+  [ledger](faster-compcert/TRUSTED_BASE.md)).
 - [ ] Opt-in libm builtins (`sqrt`, `floor`) and unaligned 64-bit accesses:
   these need changes to the trusted model.
 - [x] Fix the Loadfwd compile-time/memory blow-up on large functions (65 GB →
