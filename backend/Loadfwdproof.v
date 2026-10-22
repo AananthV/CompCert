@@ -18,6 +18,287 @@ Require Import Values Memory Globalenvs Events Smallstep.
 Require Import Op Registers RTL.
 Require Import Loadfwd.
 
+(** * Registers mentioned by the facts *)
+
+(** All the facts computed by the analysis only mention registers of the
+  set [M] computed by [mentionable].  This justifies the fast path of
+  [kill_reg_m]. *)
+
+Definition sexpr_ok (M: PTree.t unit) (e: sexpr) : Prop :=
+  forall x, sexpr_mentions x e = true -> M!x <> None.
+
+Definition sexprlist_ok (M: PTree.t unit) (el: sexprlist) : Prop :=
+  forall x, sexprlist_mentions x el = true -> M!x <> None.
+
+Definition fact_ok (M: PTree.t unit) (f: fact) : Prop :=
+  forall x, fact_mentions x f = true -> M!x <> None.
+
+Definition facts_ok (M: PTree.t unit) (mp: PTree.t fact) : Prop :=
+  forall r f, mp!r = Some f -> fact_ok M f.
+
+Lemma subst_mentions:
+  forall x r e,
+  (forall y, sexpr_mentions x (subst r e y) = true ->
+             sexpr_mentions x y = true \/ sexpr_mentions x e = true)
+  /\ (forall l, sexprlist_mentions x (subst_list r e l) = true ->
+             sexprlist_mentions x l = true \/ sexpr_mentions x e = true).
+Proof.
+  intros x r e. apply sexpr_mutind; simpl; intros.
+- destruct (peq r r0); auto.
+- auto.
+- discriminate.
+- apply orb_true_iff in H1. destruct H1 as [A|A].
+  destruct (H A) as [B|B]; auto. rewrite B; auto.
+  destruct (H0 A) as [B|B]; auto. rewrite B, orb_true_r; auto.
+Qed.
+
+Lemma kill_one_ok:
+  forall M mp r f f',
+  facts_ok M mp -> fact_ok M f ->
+  kill_one r (subst_for r mp) f = Some f' -> fact_ok M f'.
+Proof.
+  unfold kill_one; intros. destruct (fact_mentions r f).
+- unfold subst_for, expr_fact in H1.
+  destruct (mp!r) as [[e|]|] eqn:E; try discriminate.
+  destruct (sexpr_mentions r e); try discriminate.
+  destruct (Nat.leb (fact_size (subst_fact r e f)) max_sexpr_size); inv H1.
+  assert (OKE: forall x, sexpr_mentions x e = true -> M!x <> None)
+    by (intros; apply (H r (Fexpr e) E); auto).
+  red; intros x X. destruct f; simpl in X.
+  + destruct (proj1 (subst_mentions x r e) _ X) as [A|A]. apply H0; simpl; auto. auto.
+  + destruct (proj2 (subst_mentions x r e) _ X) as [A|A]. apply H0; simpl; auto. auto.
+- inv H1; auto.
+Qed.
+
+Lemma kill_reg_ok:
+  forall M mp r, facts_ok M mp -> facts_ok M (kill_reg r mp).
+Proof.
+  intros.
+  assert (FULL: facts_ok M (kill_reg_full r mp)).
+  { unfold kill_reg_full; red; intros r0 f E.
+    rewrite PTree.grspec in E. destruct (PTree.elt_eq r0 r); try discriminate.
+    rewrite PTree.gmap_filter1 in E. destruct (mp!r0) as [f0|] eqn:E0; try discriminate.
+    eapply kill_one_ok; eauto. }
+  unfold kill_reg. destruct (mp!r); auto.
+  destruct (PTree.fold1 (fun b f => b && negb (fact_mentions r f)) mp true); auto.
+Qed.
+
+Lemma kill_reg_m_ok:
+  forall M mp r, facts_ok M mp -> facts_ok M (kill_reg_m M r mp).
+Proof.
+  unfold kill_reg_m; intros. destruct (M!r). apply kill_reg_ok; auto.
+  red; intros r0 f E. rewrite PTree.grspec in E. destruct (PTree.elt_eq r0 r); try discriminate.
+  eauto.
+Qed.
+
+Lemma set_fact_ok:
+  forall M mp r f, facts_ok M mp -> fact_ok M f -> facts_ok M (set_fact M r f mp).
+Proof.
+  unfold set_fact; intros.
+  destruct (kill_one r (subst_for r mp) f) as [f'|] eqn:K.
+- red; intros r0 f0 E. rewrite PTree.gsspec in E. destruct (peq r0 r).
+  inv E. eapply kill_one_ok; eauto.
+  eapply kill_reg_m_ok; eauto.
+- apply kill_reg_m_ok; auto.
+Qed.
+
+Lemma kill_loads_ok:
+  forall M mp, facts_ok M mp -> facts_ok M (kill_loads mp).
+Proof.
+  unfold kill_loads; intros; red; intros.
+  rewrite PTree.gfilter1 in H0. destruct (mp!r) as [f'|] eqn:E; try discriminate.
+  destruct (is_expr_fact f'); inv H0. eauto.
+Qed.
+
+Lemma kill_regs_ok:
+  forall M rl mp, facts_ok M mp -> facts_ok M (kill_regs M rl mp).
+Proof.
+  induction rl; simpl; intros; auto. apply IHrl. apply kill_reg_m_ok; auto.
+Qed.
+
+Lemma add_regs_mono:
+  forall rl u x, u!x <> None -> (add_regs rl u)!x <> None.
+Proof.
+  induction rl; simpl; intros; auto. apply IHrl.
+  rewrite PTree.gsspec. destruct (peq x a); auto. congruence.
+Qed.
+
+Lemma add_regs_in:
+  forall rl u x, In x rl -> (add_regs rl u)!x <> None.
+Proof.
+  induction rl; simpl; intros. contradiction.
+  destruct H. subst a. apply add_regs_mono. rewrite PTree.gss. congruence.
+  auto.
+Qed.
+
+Lemma mentionable_spec:
+  forall rel c pc i x,
+  c!pc = Some i -> In x (mention_regs rel i) -> (mentionable rel c)!x <> None.
+Proof.
+  intros. unfold mentionable. rewrite PTree.fold1_spec.
+  assert (A: forall (l: list (positive * instruction)) (u: PTree.t unit),
+             (forall y, u!y <> None ->
+                (fold_left (fun a p => add_regs (mention_regs rel (snd p)) a) l u) ! y <> None)
+          /\ (forall p y, In p l -> In y (mention_regs rel (snd p)) ->
+                (fold_left (fun a p => add_regs (mention_regs rel (snd p)) a) l u) ! y <> None)).
+  { induction l as [|p l IH]; simpl; intros.
+    - split; intros; [auto | contradiction].
+    - split; intros.
+      + apply (proj1 (IH _)). apply add_regs_mono; auto.
+      + destruct H1. subst p0. apply (proj1 (IH _)). apply add_regs_in; auto.
+        apply (proj2 (IH _)) with p0; auto. }
+  apply (proj2 (A _ _)) with (pc, i); auto. apply PTree.elements_correct; auto.
+Qed.
+
+Lemma sregs_ok:
+  forall M args, (forall a, In a args -> M!a <> None) -> sexprlist_ok M (sregs args).
+Proof.
+  induction args; simpl; intros; red; simpl; intros. discriminate.
+  apply orb_true_iff in H0. destruct H0.
+  apply Pos.eqb_eq in H0. subst. auto.
+  apply IHargs; auto.
+Qed.
+
+Lemma transfer_instr_ok:
+  forall rel c pc i mp,
+  c!pc = Some i ->
+  facts_ok (mentionable rel c) mp ->
+  facts_ok (mentionable rel c) (transfer_instr rel (mentionable rel c) i mp).
+Proof.
+  intros. set (M := mentionable rel c) in *.
+  assert (ARGS: forall x, In x (mention_regs rel i) -> M!x <> None)
+    by (intros; eapply mentionable_spec; eauto).
+  destruct i; simpl in *; auto.
+- (* op *)
+  unfold transfer_op. destruct (is_move_operation o l) as [src|] eqn:MV.
+  + exploit is_move_operation_correct; eauto. intros [? ?]; subst o l.
+    assert (DFL: facts_ok M (match rel!r with
+                             | Some _ => set_fact M r (Fexpr (Sreg src)) mp
+                             | None => kill_reg_m M r mp end)).
+    { destruct (rel!r) eqn:R. apply set_fact_ok; auto.
+      red; simpl; intros. apply Pos.eqb_eq in H1; subst. apply ARGS; simpl; auto.
+      apply kill_reg_m_ok; auto. }
+    destruct (mp!src) as [[e|chunk addr el]|] eqn:E; auto.
+    apply set_fact_ok; eauto.
+  + destruct (rel!r) eqn:R. 2: apply kill_reg_m_ok; auto.
+    destruct (op_depends_on_memory o). apply kill_reg_m_ok; auto.
+    apply set_fact_ok; auto. red; simpl; intros. apply (sregs_ok M l); auto.
+- (* load *)
+  apply set_fact_ok; auto. red; simpl; intros. apply (sregs_ok M l); auto.
+- (* store *)
+  assert (K: facts_ok M (kill_loads mp)) by (apply kill_loads_ok; auto).
+  destruct (store_full m); auto.
+  red; intros. rewrite PTree.gsspec in H1. destruct (peq r0 r); eauto.
+  inv H1. red; simpl; intros. apply (sregs_ok M l); auto.
+- (* call *)
+  apply kill_reg_m_ok. apply kill_loads_ok; auto.
+- (* builtin *)
+  apply kill_regs_ok. apply kill_loads_ok; auto.
+Qed.
+
+Section AU_OK.
+
+Variable M: PTree.t unit.
+Variables m1 m2: PTree.t fact.
+Hypothesis OK1: facts_ok M m1.
+Hypothesis OK2: facts_ok M m2.
+
+Lemma au_list_with_ok:
+  forall (au: sexpr -> sexpr -> option sexpr),
+  (forall e1 e2 e, au e1 e2 = Some e -> sexpr_ok M e1 -> sexpr_ok M e2 -> sexpr_ok M e) ->
+  forall el1 el2 el, au_list_with au el1 el2 = Some el ->
+  sexprlist_ok M el1 -> sexprlist_ok M el2 -> sexprlist_ok M el.
+Proof.
+  intros au AU. induction el1; destruct el2; simpl; intros; try discriminate.
+- inv H. auto.
+- destruct (au e e0) as [e1|] eqn:A; try discriminate.
+  destruct (au_list_with au el1 el2) as [l1|] eqn:B; try discriminate.
+  inv H. red; simpl; intros. apply orb_true_iff in H. destruct H.
+  + eapply AU; eauto.
+    red; intros; apply H0; simpl; rewrite H2; auto.
+    red; intros; apply H1; simpl; rewrite H2; auto.
+  + eapply IHel1; eauto.
+    red; intros; apply H0; simpl; rewrite H2, orb_true_r; auto.
+    red; intros; apply H1; simpl; rewrite H2, orb_true_r; auto.
+Qed.
+
+Lemma expr_fact_ok:
+  forall mp r e, facts_ok M mp -> expr_fact mp r = Some e -> sexpr_ok M e.
+Proof.
+  unfold expr_fact; intros. destruct (mp!r) as [[e'|]|] eqn:E; inv H0.
+  red; intros. apply (H r (Fexpr e) E); auto.
+Qed.
+
+Lemma au_ok:
+  forall n e1 e2 e, au m1 m2 n e1 e2 = Some e -> sexpr_ok M e1 -> sexpr_ok M e2 -> sexpr_ok M e.
+Proof.
+  induction n; simpl; intros.
+- destruct (sexpr_beq e1 e2); inv H; auto.
+- destruct (sexpr_beq e1 e2). inv H; auto.
+  destruct e1 as [r1|op1 el1].
+  + destruct (expr_fact m1 r1) as [e1'|] eqn:X1.
+    * apply (IHn e1' e2 e H); auto. apply expr_fact_ok with m1 r1; auto.
+    * destruct e2 as [r2|op2 el2]; try discriminate.
+      destruct (expr_fact m2 r2) as [e2'|] eqn:X2; try discriminate.
+      apply (IHn (Sreg r1) e2' e H); auto. apply expr_fact_ok with m2 r2; auto.
+  + destruct e2 as [r2|op2 el2].
+    * destruct (expr_fact m2 r2) as [e2'|] eqn:X2; try discriminate.
+      apply (IHn (Sop op1 el1) e2' e H); auto. apply expr_fact_ok with m2 r2; auto.
+    * destruct (eq_operation op1 op2); try discriminate.
+      destruct (au_list_with (au m1 m2 n) el1 el2) as [el|] eqn:L; inv H.
+      red; simpl; intros. eapply au_list_with_ok; eauto.
+Qed.
+
+Lemma lub_ok:
+  facts_ok M (PTree.combine (lub_fact m1 m2) m1 m2).
+Proof.
+  red; intros. rewrite PTree.gcombine in H by auto. unfold lub_fact in H.
+  destruct (m1!r) as [f1|] eqn:E1; destruct (m2!r) as [f2|] eqn:E2; try discriminate.
+  destruct (fact_beq f1 f2). inv H; eauto.
+  destruct (au_fact m1 m2 f1 f2) as [g|] eqn:A; try discriminate.
+  assert (G: fact_ok M g).
+  { unfold au_fact in A.
+    destruct f1 as [e1|chunk1 addr1 el1], f2 as [e2|chunk2 addr2 el2]; try discriminate.
+    - destruct (au m1 m2 au_fuel e1 e2) as [e|] eqn:AU; inv A.
+      red; simpl; intros. eapply au_ok; eauto.
+      red; intros; apply (OK1 r (Fexpr e1)); auto.
+      red; intros; apply (OK2 r (Fexpr e2)); auto.
+    - destruct (chunk_eq chunk1 chunk2); try discriminate.
+      destruct (eq_addressing addr1 addr2); try discriminate.
+      destruct (au_list_with (au m1 m2 au_fuel) el1 el2) as [el|] eqn:AU; try discriminate.
+      injection A; intros <-.
+      red; simpl; intros. eapply au_list_with_ok. intros; eapply au_ok; eauto. eauto.
+      red; intros; apply (OK1 r (Fload chunk1 addr1 el1)); auto.
+      red; intros; apply (OK2 r (Fload chunk2 addr2 el2)); auto.
+      auto. }
+  destruct (fact_beq f1 g). inv H; eauto.
+  destruct (Nat.ltb (fact_size f1) (fact_size g) && Nat.leb (fact_size g) max_sexpr_size); inv H; auto.
+Qed.
+
+End AU_OK.
+
+Definition lfacts_ok (M: PTree.t unit) (x: LFacts.t) : Prop :=
+  match x with LFacts.Bot => True | LFacts.Facts mp => facts_ok M mp end.
+
+Lemma analyze_ok:
+  forall f pc,
+  lfacts_ok (mentionable (relevant_regs (fn_code f)) (fn_code f)) (analyze f)!!pc.
+Proof.
+  intros. set (rel := relevant_regs (fn_code f)). set (M := mentionable rel (fn_code f)).
+  assert (INIT: lfacts_ok M (PMap.init empty_facts)!!pc).
+  { rewrite PMap.gi. simpl. red; intros. rewrite PTree.gempty in H; discriminate. }
+  unfold analyze, analyze_rel. fold rel. fold M.
+  destruct (too_big f rel); auto.
+  destruct (DS.fixpoint (fn_code f) successors_instr (transfer rel M f)
+                        (fn_entrypoint f) empty_facts) as [res|] eqn:FIX; auto.
+  eapply DS.fixpoint_invariant with (P := lfacts_ok M) (code := fn_code f); eauto.
+- simpl; auto.
+- intros x y X Y. destruct x as [|m1]; destruct y as [|m2]; simpl in *; auto.
+  destruct (PTree.beq fact_beq m1 m2); simpl; auto. apply lub_ok; auto.
+- intros pc0 i x CODE X. unfold transfer. destruct x as [|mp]; simpl; auto.
+  rewrite CODE. simpl. apply transfer_instr_ok with pc0; auto.
+Qed.
+
 (** * Soundness of the static analysis *)
 
 Section SEMANTICS.
@@ -156,25 +437,58 @@ Lemma kill_reg_sound:
   facts_hold ge sp rs m mp ->
   facts_hold ge sp (rs#r <- v) m (kill_reg r mp).
 Proof.
-  unfold kill_reg; intros; red; intros.
+  assert (FULL: forall rs m mp r v,
+            facts_hold ge sp rs m mp ->
+            facts_hold ge sp (rs#r <- v) m (kill_reg_full r mp)).
+  { unfold kill_reg_full; intros; red; intros.
   rewrite PTree.grspec in H0. destruct (PTree.elt_eq r0 r); try discriminate.
   rewrite PTree.gmap_filter1 in H0. destruct (mp!r0) as [f0|] eqn:E; try discriminate.
   rewrite fact_holds_v_eq. rewrite Regmap.gso by auto.
-  eapply kill_one_sound; eauto. rewrite <- fact_holds_v_eq. apply H; auto.
+  eapply kill_one_sound; eauto. rewrite <- fact_holds_v_eq. apply H; auto. }
+  intros. unfold kill_reg.
+  destruct (mp!r) as [f0|] eqn:R; auto.
+  destruct (PTree.fold1 (fun b f => b && negb (fact_mentions r f)) mp true) eqn:FA; auto.
+  assert (FA': forall (l: list (positive * fact)) b, fold_left (fun b p => b && negb (fact_mentions r (snd p))) l b = true ->
+                b = true /\ forall p, In p l -> fact_mentions r (snd p) = false).
+  { induction l; simpl; intros. split; auto; tauto.
+    apply IHl in H0. destruct H0 as [B C]. apply andb_prop in B. destruct B as [B1 B2].
+    split; auto. intros p [<-|IN]; auto. apply negb_true_iff; auto. }
+  rewrite PTree.fold1_spec in FA. apply FA' in FA. destruct FA as [_ FA].
+  red; intros r0 f E.
+  assert (N: fact_mentions r f = false) by (apply (FA (r0, f)); apply PTree.elements_correct; auto).
+  rewrite fact_holds_v_eq. rewrite Regmap.gso by congruence.
+  eapply kill_one_sound; eauto. unfold kill_one; rewrite N; auto.
+  rewrite <- fact_holds_v_eq. apply H; auto.
+Qed.
+
+Lemma kill_reg_m_sound:
+  forall M rs m mp r v,
+  facts_ok M mp ->
+  facts_hold ge sp rs m mp ->
+  facts_hold ge sp (rs#r <- v) m (kill_reg_m M r mp).
+Proof.
+  unfold kill_reg_m; intros. destruct (M!r) eqn:MR. apply kill_reg_sound; auto.
+  red; intros r0 f E. rewrite PTree.grspec in E. destruct (PTree.elt_eq r0 r); try discriminate.
+  assert (N: fact_mentions r f = false).
+  { destruct (fact_mentions r f) eqn:FM; auto. elim (H r0 f E r FM); auto. }
+  rewrite fact_holds_v_eq. rewrite Regmap.gso by auto.
+  apply fact_holds_v_agree with rs. rewrite <- fact_holds_v_eq. apply H0; auto.
+  intros. rewrite Regmap.gso; auto. intro; subst; congruence.
 Qed.
 
 Lemma set_fact_sound:
-  forall rs m mp r v f,
+  forall M rs m mp r v f,
+  facts_ok M mp ->
   facts_hold ge sp rs m mp ->
   fact_holds_v rs m v f ->
-  facts_hold ge sp (rs#r <- v) m (set_fact r f mp).
+  facts_hold ge sp (rs#r <- v) m (set_fact M r f mp).
 Proof.
   intros. unfold set_fact.
   destruct (kill_one r (subst_for r mp) f) as [f'|] eqn:K.
-- red; intros. rewrite PTree.gsspec in H1. destruct (peq r0 r).
-  + inv H1. rewrite fact_holds_v_eq. rewrite Regmap.gss. eapply kill_one_sound; eauto.
-  + eapply kill_reg_sound; eauto.
-- apply kill_reg_sound; auto.
+- red; intros. rewrite PTree.gsspec in H2. destruct (peq r0 r).
+  + inv H2. rewrite fact_holds_v_eq. rewrite Regmap.gss. eapply kill_one_sound; eauto.
+  + eapply kill_reg_m_sound; eauto.
+- apply kill_reg_m_sound; auto.
 Qed.
 
 Lemma kill_loads_sound:
@@ -189,50 +503,53 @@ Proof.
 Qed.
 
 Lemma kill_regs_same:
-  forall rl rs m mp,
+  forall M rl rs m mp,
+  facts_ok M mp ->
   facts_hold ge sp rs m mp ->
-  facts_hold ge sp rs m (kill_regs rl mp).
+  facts_hold ge sp rs m (kill_regs M rl mp).
 Proof.
   induction rl; simpl; intros. auto.
-  apply IHrl. apply facts_hold_ext with (rs#a <- (rs#a)).
+  apply IHrl. apply kill_reg_m_ok; auto. apply facts_hold_ext with (rs#a <- (rs#a)).
   intros. rewrite Regmap.gsspec. destruct (peq r a); subst; auto.
-  apply kill_reg_sound; auto.
+  apply kill_reg_m_sound; auto.
 Qed.
 
 (** Soundness of the transfer function, instruction by instruction. *)
 
 Lemma transfer_op_sound:
-  forall rel rs m mp op (args: list reg) (res: reg) v,
+  forall rel M rs m mp op (args: list reg) (res: reg) v,
+  facts_ok M mp ->
   facts_hold ge sp rs m mp ->
   eval_operation ge sp op rs##args m = Some v ->
-  facts_hold ge sp (rs#res <- v) m (transfer_op rel op args res mp).
+  facts_hold ge sp (rs#res <- v) m (transfer_op rel M op args res mp).
 Proof.
-  intros. unfold transfer_op.
+  intros until v; intros OK H H0. unfold transfer_op.
   destruct (is_move_operation op args) as [src|] eqn:MV.
 - exploit is_move_operation_correct; eauto. intros [? ?]; subst op args.
   simpl in H0. inv H0.
   assert (DFL: facts_hold ge sp (rs#res <- (rs#src)) m
                  (match rel!res with
-                  | Some _ => set_fact res (Fexpr (Sreg src)) mp
-                  | None => kill_reg res mp end)).
-  { destruct (rel!res). apply set_fact_sound; [auto | reflexivity]. apply kill_reg_sound; auto. }
+                  | Some _ => set_fact M res (Fexpr (Sreg src)) mp
+                  | None => kill_reg_m M res mp end)).
+  { destruct (rel!res). apply set_fact_sound; [auto | auto | reflexivity]. apply kill_reg_m_sound; auto. }
   destruct (mp!src) as [[e|chunk addr el]|] eqn:E; auto.
   apply set_fact_sound; auto. rewrite <- fact_holds_v_eq. apply H; auto.
-- destruct (rel!res). 2: apply kill_reg_sound; auto.
+- destruct (rel!res). 2: apply kill_reg_m_sound; auto.
   destruct (op_depends_on_memory op) eqn:DM.
-  apply kill_reg_sound; auto.
+  apply kill_reg_m_sound; auto.
   apply set_fact_sound; auto. simpl.
   rewrite sregs_sound. rewrite <- H0. apply op_depends_on_memory_correct; auto.
 Qed.
 
 Lemma transfer_load_sound:
-  forall rs m mp chunk addr args dst a v,
+  forall M rs m mp chunk addr args dst a v,
+  facts_ok M mp ->
   facts_hold ge sp rs m mp ->
   eval_addressing ge sp addr rs##args = Some a ->
   Mem.loadv chunk m a = Some v ->
-  facts_hold ge sp (rs#dst <- v) m (set_fact dst (Fload chunk addr (sregs args)) mp).
+  facts_hold ge sp (rs#dst <- v) m (set_fact M dst (Fload chunk addr (sregs args)) mp).
 Proof.
-  intros. apply set_fact_sound; auto. simpl; intros.
+  intros until v; intros OK H H0 H1. apply set_fact_sound; auto. simpl; intros.
   rewrite sregs_sound in H2. inv H2.
   assert (a0 = a) by congruence. subst a0.
   assert (v' = v) by congruence. subst v'. auto.
@@ -246,11 +563,11 @@ Proof.
 Qed.
 
 Lemma transfer_store_sound:
-  forall rel rs m mp chunk addr args src s a m',
+  forall rel M rs m mp chunk addr args src s a m',
   facts_hold ge sp rs m mp ->
   eval_addressing ge sp addr rs##args = Some a ->
   Mem.storev chunk m a rs#src = Some m' ->
-  facts_hold ge sp rs m' (transfer_instr rel (Istore chunk addr args src s) mp).
+  facts_hold ge sp rs m' (transfer_instr rel M (Istore chunk addr args src s) mp).
 Proof.
   intros. simpl.
   assert (K: facts_hold ge sp rs m' (kill_loads mp)) by (eapply kill_loads_sound; eauto).
@@ -266,22 +583,24 @@ Proof.
 Qed.
 
 Lemma transfer_call_sound:
-  forall rs m mp res v m',
+  forall M rs m mp res v m',
+  facts_ok M mp ->
   facts_hold ge sp rs m mp ->
-  facts_hold ge sp (rs#res <- v) m' (kill_reg res (kill_loads mp)).
+  facts_hold ge sp (rs#res <- v) m' (kill_reg_m M res (kill_loads mp)).
 Proof.
-  intros. apply kill_reg_sound. eapply kill_loads_sound; eauto.
+  intros. apply kill_reg_m_sound. apply kill_loads_ok; auto. eapply kill_loads_sound; eauto.
 Qed.
 
 Lemma transfer_builtin_sound:
-  forall rs m mp res v m',
+  forall M rs m mp res v m',
+  facts_ok M mp ->
   facts_hold ge sp rs m mp ->
-  facts_hold ge sp (regmap_setres res v rs) m' (kill_regs (params_of_builtin_res res) (kill_loads mp)).
+  facts_hold ge sp (regmap_setres res v rs) m' (kill_regs M (params_of_builtin_res res) (kill_loads mp)).
 Proof.
   intros. destruct res; simpl.
-- apply kill_reg_sound. eapply kill_loads_sound; eauto.
+- apply kill_reg_m_sound. apply kill_loads_ok; auto. eapply kill_loads_sound; eauto.
 - eapply kill_loads_sound; eauto.
-- apply kill_regs_same. eapply kill_loads_sound; eauto.
+- apply kill_regs_same. apply kill_loads_ok; auto. eapply kill_loads_sound; eauto.
 Qed.
 
 Lemma find_load_sound:
@@ -326,12 +645,13 @@ Lemma analyze_entry:
   forall {F V} (ge: Genv.t F V) sp f rs m,
   lholds ge sp rs m (analyze f)!!(fn_entrypoint f).
 Proof.
-  intros. unfold analyze.
+  intros. unfold analyze, analyze_rel.
   assert (E: lholds ge sp rs m (PMap.init empty_facts)!!(fn_entrypoint f)).
   { rewrite PMap.gi. simpl; red; intros. rewrite PTree.gempty in H; discriminate. }
   destruct (too_big f (relevant_regs (fn_code f))); auto.
-  destruct (DS.fixpoint (fn_code f) successors_instr (transfer (relevant_regs (fn_code f)) f)
-                        (fn_entrypoint f) empty_facts) as [res|] eqn:FIX; auto.
+  destruct (DS.fixpoint (fn_code f) successors_instr
+              (transfer (relevant_regs (fn_code f)) (mentionable (relevant_regs (fn_code f)) (fn_code f)) f)
+              (fn_entrypoint f) empty_facts) as [res|] eqn:FIX; auto.
   apply lholds_ge with empty_facts. eapply DS.fixpoint_entry; eauto.
   simpl; red; intros. rewrite PTree.gempty in H; discriminate.
 Qed.
@@ -341,21 +661,24 @@ Lemma analyze_succ:
   (fn_code f)!pc = Some i ->
   In s (successors_instr i) ->
   lholds ge sp rs m (analyze f)!!pc ->
-  (forall rel mp, facts_hold ge sp rs m mp -> facts_hold ge sp rs' m' (transfer_instr rel i mp)) ->
+  (forall rel M mp, facts_ok M mp -> facts_hold ge sp rs m mp ->
+                    facts_hold ge sp rs' m' (transfer_instr rel M i mp)) ->
   lholds ge sp rs' m' (analyze f)!!s.
 Proof.
-  intros. destruct ((analyze f)!!pc) as [|mp] eqn:A; simpl in H1; try contradiction.
-  set (rel := relevant_regs (fn_code f)).
-  apply lholds_ge with (transfer rel f pc (analyze f)!!pc).
-- assert (INIT: LFacts.ge (PMap.init empty_facts)!!s (transfer rel f pc (analyze f)!!pc)).
-  { rewrite PMap.gi. destruct (transfer rel f pc (analyze f)!!pc); simpl; auto.
+  intros. generalize (analyze_ok f pc). intros OK.
+  destruct ((analyze f)!!pc) as [|mp] eqn:A; simpl in H1, OK; try contradiction.
+  set (rel := relevant_regs (fn_code f)) in *.
+  set (M := mentionable rel (fn_code f)) in *.
+  apply lholds_ge with (transfer rel M f pc (analyze f)!!pc).
+- assert (INIT: LFacts.ge (PMap.init empty_facts)!!s (transfer rel M f pc (analyze f)!!pc)).
+  { rewrite PMap.gi. destruct (transfer rel M f pc (analyze f)!!pc); simpl; auto.
     intros. red; intros. rewrite PTree.gempty in H4; discriminate. }
-  unfold analyze at 1. fold rel.
+  unfold analyze at 1. unfold analyze_rel. fold rel. fold M.
   destruct (too_big f rel) eqn:TB; auto.
-  destruct (DS.fixpoint (fn_code f) successors_instr (transfer rel f) (fn_entrypoint f) empty_facts) as [res|] eqn:FIX; auto.
+  destruct (DS.fixpoint (fn_code f) successors_instr (transfer rel M f) (fn_entrypoint f) empty_facts) as [res|] eqn:FIX; auto.
   replace (analyze f) with res.
   eapply DS.fixpoint_solution; eauto. intros; reflexivity.
-  unfold analyze. fold rel. rewrite TB, FIX; auto.
+  unfold analyze, analyze_rel. fold rel. fold M. rewrite TB, FIX; auto.
 - rewrite A. unfold transfer. rewrite H. simpl. auto.
 Qed.
 
@@ -507,8 +830,8 @@ Proof.
   apply set_reg_lessdef; auto.
 
 - (* Iload *)
-  assert (TR: forall rel mp, facts_hold ge sp rs m mp ->
-              facts_hold ge sp (rs#dst <- v) m (transfer_instr rel (Iload chunk addr args dst pc') mp)).
+  assert (TR: forall rel M mp, facts_ok M mp -> facts_hold ge sp rs m mp ->
+              facts_hold ge sp (rs#dst <- v) m (transfer_instr rel M (Iload chunk addr args dst pc') mp)).
   { intros; simpl. eapply transfer_load_sound; eauto. }
   destruct ((analyze f)!!pc) as [|mp] eqn:AP; simpl in SAT; try contradiction.
   destruct (find_load mp chunk addr args) as [r|] eqn:FL.

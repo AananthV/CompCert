@@ -511,16 +511,22 @@ Module LFacts <: SEMILATTICE.
     destruct x; simpl; auto.
   Qed.
 
+  (** The common case of equal arguments is tested first, to avoid
+    rebuilding the map. *)
+
   Definition lub (x y: t) : t :=
     match x, y with
     | Bot, _ => y
     | _, Bot => x
-    | Facts m1, Facts m2 => Facts (PTree.combine (lub_fact m1 m2) m1 m2)
+    | Facts m1, Facts m2 =>
+        if PTree.beq fact_beq m1 m2 then x
+        else Facts (PTree.combine (lub_fact m1 m2) m1 m2)
     end.
 
   Lemma ge_lub_left: forall x y, ge (lub x y) x.
   Proof.
     destruct x, y; simpl; auto.
+    destruct (PTree.beq fact_beq m m0); simpl; auto.
     intros; red; intros. rewrite PTree.gcombine in H0 by auto.
     exploit (lub_fact_sound g sp rs); eauto. intros [P Q]. apply P; auto.
   Qed.
@@ -528,7 +534,10 @@ Module LFacts <: SEMILATTICE.
   Lemma ge_lub_right: forall x y, ge (lub x y) y.
   Proof.
     destruct x, y; simpl; auto.
-    intros; red; intros. rewrite PTree.gcombine in H0 by auto.
+    destruct (PTree.beq fact_beq m m0) eqn:B.
+  - assert (E: Facts m = Facts m0) by (apply beq_correct; simpl; auto).
+    injection E; intros <-. simpl; auto.
+  - intros F V g sp rs mm H r f GET. rewrite PTree.gcombine in GET by auto.
     exploit (lub_fact_sound g sp rs); eauto. intros [P Q]. apply Q; auto.
   Qed.
 
@@ -556,18 +565,40 @@ Definition kill_one (r: reg) (sub: option sexpr) (f: fact) : option fact :=
     end
   else Some f.
 
-Definition kill_reg (r: reg) (mp: facts) : facts :=
+Definition kill_reg_full (r: reg) (mp: facts) : facts :=
   PTree.remove r (PTree.map_filter1 (kill_one r (subst_for r mp)) mp).
 
-Definition kill_regs (rl: list reg) (mp: facts) : facts :=
-  fold_left (fun mp r => kill_reg r mp) rl mp.
+(** In the common case where [r] has no fact and no fact mentions [r],
+  the facts are unchanged, and are returned without being copied. *)
+
+Definition kill_reg (r: reg) (mp: facts) : facts :=
+  match mp!r with
+  | None =>
+      if PTree.fold1 (fun b f => b && negb (fact_mentions r f)) mp true
+      then mp
+      else kill_reg_full r mp
+  | Some _ => kill_reg_full r mp
+  end.
+
+(** [M] is a set of registers that contains all the registers mentioned
+  by the facts (see [mentionable] below).  If [r] is not in [M], no fact
+  mentions [r]. *)
+
+Definition kill_reg_m (M: PTree.t unit) (r: reg) (mp: facts) : facts :=
+  match M!r with
+  | Some _ => kill_reg r mp
+  | None => PTree.remove r mp
+  end.
+
+Definition kill_regs (M: PTree.t unit) (rl: list reg) (mp: facts) : facts :=
+  fold_left (fun mp r => kill_reg_m M r mp) rl mp.
 
 (** Record the fact [f] for register [r], which has just been assigned.
   The fact is expressed in terms of the values of registers before the
   assignment. *)
 
-Definition set_fact (r: reg) (f: fact) (mp: facts) : facts :=
-  let mp' := kill_reg r mp in
+Definition set_fact (M: PTree.t unit) (r: reg) (f: fact) (mp: facts) : facts :=
+  let mp' := kill_reg_m M r mp in
   match kill_one r (subst_for r mp) f with
   | Some f' => PTree.set r f' mp'
   | None => mp'
@@ -595,51 +626,51 @@ Definition store_full (chunk: memory_chunk) : bool :=
   contribute to the computation of addresses (see [relevant_regs] below).
   Load facts are always recorded.  Dropping facts is always sound. *)
 
-Definition transfer_op (rel: PTree.t unit) (op: operation) (args: list reg) (res: reg)
+Definition transfer_op (rel M: PTree.t unit) (op: operation) (args: list reg) (res: reg)
                        (mp: facts) : facts :=
   match is_move_operation op args with
   | Some src =>
       match mp!src with
-      | Some (Fload _ _ _ as f) => set_fact res f mp
+      | Some (Fload _ _ _ as f) => set_fact M res f mp
       | _ =>
           match rel!res with
-          | Some _ => set_fact res (Fexpr (Sreg src)) mp
-          | None => kill_reg res mp
+          | Some _ => set_fact M res (Fexpr (Sreg src)) mp
+          | None => kill_reg_m M res mp
           end
       end
   | None =>
       match rel!res with
       | Some _ =>
           if op_depends_on_memory op
-          then kill_reg res mp
-          else set_fact res (Fexpr (Sop op (sregs args))) mp
-      | None => kill_reg res mp
+          then kill_reg_m M res mp
+          else set_fact M res (Fexpr (Sop op (sregs args))) mp
+      | None => kill_reg_m M res mp
       end
   end.
 
-Definition transfer_instr (rel: PTree.t unit) (i: instruction) (mp: facts) : facts :=
+Definition transfer_instr (rel M: PTree.t unit) (i: instruction) (mp: facts) : facts :=
   match i with
   | Inop _ | Icond _ _ _ _ | Ijumptable _ _ => mp
-  | Iop op args res _ => transfer_op rel op args res mp
+  | Iop op args res _ => transfer_op rel M op args res mp
   | Iload chunk addr args dst _ =>
-      set_fact dst (Fload chunk addr (sregs args)) mp
+      set_fact M dst (Fload chunk addr (sregs args)) mp
   | Istore chunk addr args src _ =>
       let mp' := kill_loads mp in
       if store_full chunk
       then PTree.set src (Fload chunk addr (sregs args)) mp'
       else mp'
-  | Icall _ _ _ res _ => kill_reg res (kill_loads mp)
-  | Ibuiltin _ _ res _ => kill_regs (params_of_builtin_res res) (kill_loads mp)
+  | Icall _ _ _ res _ => kill_reg_m M res (kill_loads mp)
+  | Ibuiltin _ _ res _ => kill_regs M (params_of_builtin_res res) (kill_loads mp)
   | Itailcall _ _ _ | Ireturn _ => mp
   end.
 
-Definition transfer (rel: PTree.t unit) (f: function) (pc: node) (x: LFacts.t) : LFacts.t :=
+Definition transfer (rel M: PTree.t unit) (f: function) (pc: node) (x: LFacts.t) : LFacts.t :=
   match x with
   | LFacts.Bot => LFacts.Bot
   | LFacts.Facts mp =>
       match f.(fn_code)!pc with
       | None => x
-      | Some i => LFacts.Facts (transfer_instr rel i mp)
+      | Some i => LFacts.Facts (transfer_instr rel M i mp)
       end
   end.
 
@@ -652,8 +683,8 @@ Definition add_regs (rl: list reg) (u: PTree.t unit) : PTree.t unit :=
   fold_left (fun u r => PTree.set r tt u) rl u.
 
 Definition relevant_step (c: code) (u: PTree.t unit) : PTree.t unit :=
-  PTree.fold
-    (fun u pc i =>
+  PTree.fold1
+    (fun u i =>
        match i with
        | Iop op args res _ =>
            match u!res with Some _ => add_regs args u | None => u end
@@ -661,16 +692,45 @@ Definition relevant_step (c: code) (u: PTree.t unit) : PTree.t unit :=
        end)
     c u.
 
+(** [relevant_iter c n u] computes [Nat.iter n (relevant_step c) u], stopping
+  as soon as a fixpoint is reached.  [relevant_step] only adds registers,
+  hence the test of the number of registers. *)
+
+Definition unit_tree_size (t: PTree.t unit) : nat :=
+  PTree.fold1 (fun n _ => S n) t O.
+
+Fixpoint relevant_iter (c: code) (n: nat) (u: PTree.t unit) : PTree.t unit :=
+  match n with
+  | O => u
+  | S n' =>
+      let u' := relevant_step c u in
+      if Nat.eqb (unit_tree_size u') (unit_tree_size u) then u else relevant_iter c n' u'
+  end.
+
 Definition relevant_regs (c: code) : PTree.t unit :=
   let r0 :=
-    PTree.fold
-      (fun u pc i =>
+    PTree.fold1
+      (fun u i =>
          match i with
          | Iload _ _ args _ _ | Istore _ _ args _ _ => add_regs args u
          | _ => u
          end)
       c (PTree.empty unit) in
-  Nat.iter au_fuel (relevant_step c) r0.
+  relevant_iter c au_fuel r0.
+
+(** The registers that can be mentioned by the facts: the arguments of
+  loads and stores, and the arguments of the operations that define
+  relevant registers. *)
+
+Definition mention_regs (rel: PTree.t unit) (i: instruction) : list reg :=
+  match i with
+  | Iload _ _ args _ _ | Istore _ _ args _ _ => args
+  | Iop op args res _ => match rel!res with Some _ => args | None => nil end
+  | _ => nil
+  end.
+
+Definition mentionable (rel: PTree.t unit) (c: code) : PTree.t unit :=
+  PTree.fold1 (fun u i => add_regs (mention_regs rel i) u) c (PTree.empty unit).
 
 Module DS := Dataflow_Solver(LFacts)(NodeSetForward).
 
@@ -681,21 +741,24 @@ Definition empty_facts : LFacts.t := LFacts.Facts (PTree.empty fact).
   are not analyzed. *)
 
 Definition tree_size {A: Type} (t: PTree.t A) : Z :=
-  PTree.fold (fun n _ _ => Z.succ n) t 0.
+  PTree.fold1 (fun n _ => Z.succ n) t 0.
 
 Definition analysis_limit : Z := 20000000.
 
 Definition too_big (f: function) (rel: PTree.t unit) : bool :=
   zlt analysis_limit (tree_size f.(fn_code) * (tree_size rel + 1)).
 
-Definition analyze (f: function) : PMap.t LFacts.t :=
-  let rel := relevant_regs f.(fn_code) in
+Definition analyze_rel (rel: PTree.t unit) (f: function) : PMap.t LFacts.t :=
   if too_big f rel then PMap.init empty_facts else
-  match DS.fixpoint f.(fn_code) successors_instr (transfer rel f)
+  match DS.fixpoint f.(fn_code) successors_instr
+                    (transfer rel (mentionable rel f.(fn_code)) f)
                     f.(fn_entrypoint) empty_facts with
   | Some res => res
   | None => PMap.init empty_facts
   end.
+
+Definition analyze (f: function) : PMap.t LFacts.t :=
+  analyze_rel (relevant_regs f.(fn_code)) f.
 
 (** * Insertion of moves to fresh registers *)
 
@@ -802,7 +865,7 @@ Definition locations (approx: PMap.t LFacts.t) (c: code) : PTree.t (bool * fact)
     c (PTree.empty _).
 
 Definition build_table (locs: PTree.t (bool * fact)) (next: reg) : loctable :=
-  snd (PTree.fold (fun st pc bl => record_loc st (fst bl) (snd bl))
+  snd (PTree.fold1 (fun st bl => record_loc st (fst bl) (snd bl))
                   locs (next, PTree.empty _)).
 
 (** The register to be associated with the location accessed at each node,
@@ -912,8 +975,8 @@ Definition find_load (mp: facts) (chunk: memory_chunk) (addr: addressing)
   are left to CSE.  This avoids extending the live ranges of values
   needlessly, which increases register pressure. *)
 
-Definition useful_regs (maxreg: reg) (f: function) : PTree.t unit :=
-  let approx := analyze f in
+Definition useful_regs (rel: PTree.t unit) (maxreg: reg) (f: function) : PTree.t unit :=
+  let approx := analyze_rel rel f in
   PTree.fold
     (fun u pc i =>
        match i, approx!!pc with
@@ -933,27 +996,41 @@ Definition filter_choice (u: PTree.t unit) (choice: node -> instruction -> optio
   | None => None
   end.
 
-Definition insert_function (f: function) : function :=
-  let approx := analyze f in
+(** The fresh registers that are worth inserting, given the locations
+  [locs] accessed by [f].  The analysis of the code with all candidate
+  moves reuses the relevant registers [rel] of [f]: the moves define fresh
+  registers, which are never relevant, and use registers already in the
+  code. *)
+
+Definition useful_moves (f: function) (rel: PTree.t unit) (locs: PTree.t (bool * fact))
+                        : PTree.t unit * (node -> instruction -> option reg) :=
   let maxreg := max_reg_function f in
   let maxpc := max_pc_function f in
-  let locs := locations approx f.(fn_code) in
   let cm := choice_map (build_table locs (Pos.succ maxreg)) locs in
   let choice := choice_of cm in
   let u :=
     match PTree.elements cm with
     | nil => PTree.empty unit
     | _ :: _ =>
-        useful_regs maxreg
+        useful_regs rel maxreg
           (mkfunction f.(fn_sig) f.(fn_params) f.(fn_stacksize)
              (insert_code choice maxpc maxreg f.(fn_code)) f.(fn_entrypoint))
     end in
+  (u, choice).
+
+Definition insert_function_with (f: function) (u: PTree.t unit)
+                                (choice: node -> instruction -> option reg) : function :=
   mkfunction
     f.(fn_sig)
     f.(fn_params)
     f.(fn_stacksize)
-    (insert_code (filter_choice u choice) maxpc maxreg f.(fn_code))
+    (insert_code (filter_choice u choice) (max_pc_function f) (max_reg_function f) f.(fn_code))
     f.(fn_entrypoint).
+
+Definition insert_function (f: function) : function :=
+  let rel := relevant_regs f.(fn_code) in
+  let (u, choice) := useful_moves f rel (locations (analyze_rel rel f) f.(fn_code)) in
+  insert_function_with f u choice.
 
 Definition insert_fundef (fd: fundef) : fundef :=
   AST.transf_fundef insert_function fd.
@@ -973,8 +1050,7 @@ Definition transf_instr (approx: PMap.t LFacts.t) (pc: node) (i: instruction) : 
   | _, _ => i
   end.
 
-Definition transf_function (f: function) : function :=
-  let approx := analyze f in
+Definition transf_function_with (approx: PMap.t LFacts.t) (f: function) : function :=
   mkfunction
     f.(fn_sig)
     f.(fn_params)
@@ -982,8 +1058,76 @@ Definition transf_function (f: function) : function :=
     (PTree.map (transf_instr approx) f.(fn_code))
     f.(fn_entrypoint).
 
+Definition transf_function (f: function) : function :=
+  transf_function_with (analyze f) f.
+
 Definition transf_fundef (fd: fundef) : fundef :=
   AST.transf_fundef transf_function fd.
 
 Definition transf_program (p: program) : program :=
   transform_program transf_fundef p.
+
+(** * The two passes combined *)
+
+(** [fwd_program p] computes [transf_program (insert_program p)] (see
+  [fwd_program_eq] below), but avoids analyzing a function a second time
+  when no move is inserted in it, which is the common case: the analysis
+  of the function computed for the insertion of moves is then reused for
+  the replacement of loads.  The replacement is computed before the
+  analysis of the code with all candidate moves, so that the first
+  analysis need not be kept in memory. *)
+
+Definition fwd_function (f: function) : function :=
+  let rel := relevant_regs f.(fn_code) in
+  let approx := analyze_rel rel f in
+  let tf := transf_function_with approx f in
+  let (u, choice) := useful_moves f rel (locations approx f.(fn_code)) in
+  match PTree.elements u with
+  | nil => tf
+  | _ :: _ => transf_function (insert_function_with f u choice)
+  end.
+
+Definition fwd_fundef (fd: fundef) : fundef :=
+  AST.transf_fundef fwd_function fd.
+
+Definition fwd_program (p: program) : program :=
+  transform_program fwd_fundef p.
+
+Lemma insert_code_nochoice:
+  forall ch maxpc maxreg c,
+  (forall pc i, ch pc i = None) ->
+  insert_code ch maxpc maxreg c = c.
+Proof.
+  intros. unfold insert_code.
+  assert (M: forall pc i, move_for ch maxreg pc i = None).
+  { intros. unfold move_for. rewrite H; auto. }
+  assert (A: forall l (c0: code), fold_left (fun a p => add_move ch maxpc maxreg a (fst p) (snd p)) l c0 = c0).
+  { induction l; simpl; intros; auto. rewrite IHl. unfold add_move. rewrite M; auto. }
+  rewrite PTree.fold_spec, A.
+  apply PTree.extensionality; intros. rewrite PTree.gmap.
+  destruct (c!i); simpl; auto. unfold redirect. rewrite M; auto.
+Qed.
+
+Lemma fwd_function_eq:
+  forall f, fwd_function f = transf_function (insert_function f).
+Proof.
+  intros. unfold fwd_function, insert_function.
+  destruct (useful_moves f (relevant_regs (fn_code f))
+             (locations (analyze_rel (relevant_regs (fn_code f)) f) (fn_code f))) as [u choice].
+  destruct (PTree.elements u) as [|x l] eqn:E; auto.
+  assert (F: forall pc i, filter_choice u choice pc i = None).
+  { intros. unfold filter_choice. destruct (choice pc i) as [t|]; auto.
+    destruct (u!t) as [[]|] eqn:U; auto.
+    apply PTree.elements_correct in U. rewrite E in U. contradiction. }
+  unfold insert_function_with. rewrite insert_code_nochoice by auto.
+  destruct f; reflexivity.
+Qed.
+
+Lemma fwd_program_eq:
+  forall p, fwd_program p = transf_program (insert_program p).
+Proof.
+  intros. unfold fwd_program, transf_program, insert_program, transform_program; simpl.
+  f_equal. rewrite map_map. apply map_ext. intros [id [fd|gv]]; simpl; auto.
+  unfold transform_program_globdef. f_equal. f_equal.
+  destruct fd; simpl; auto. rewrite fwd_function_eq; auto.
+Qed.

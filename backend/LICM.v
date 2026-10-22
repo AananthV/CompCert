@@ -265,14 +265,25 @@ Definition check_function (f: function) (loops: list loop_info)
   && forallb (check_eqs eqs) (PTree.elements tc)
   && (match eqs_at eqs entry with nil => true | _ => false end).
 
-Definition transf_function (f: function) : function :=
-  let '(lps, repl, eqs) := licm_oracle f in
+Definition transf_function_loops (f: function)
+             (lps: list (node * PTree.t unit * list (node * hoist)))
+             (repl: PTree.t reg) (eqs: PTree.t (list (reg * reg))) : function :=
   let loops := map (fun x => let '(h, b, ch) := x in mkloop h b ch) lps in
   let tc := transf_code f loops repl in
   let entry := redirect (fun _ => false) loops f.(fn_entrypoint) in
   if check_function f loops repl eqs tc entry then
     mkfunction f.(fn_sig) f.(fn_params) f.(fn_stacksize) tc entry
   else f.
+
+(** Without loops, there is nothing to hoist: the code is not rebuilt nor
+  checked. *)
+
+Definition transf_function (f: function) : function :=
+  let '(lps, repl, eqs) := licm_oracle f in
+  match lps with
+  | nil => f
+  | _ :: _ => transf_function_loops f lps repl eqs
+  end.
 
 Definition transf_fundef (fd: fundef) : fundef :=
   AST.transf_fundef transf_function fd.

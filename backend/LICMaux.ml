@@ -63,6 +63,8 @@ type source =
 type loop = {
   header: int;
   body: bool array;
+  nodes: int array;                     (* the nodes of [body], in increasing order *)
+  rnodes: int array;                    (* the nodes of [body], in reverse postorder *)
   size: int;
   hascall: bool;
   defcount: (P.t, int) Hashtbl.t;       (* number of definitions in the loop *)
@@ -109,6 +111,26 @@ let build_cfg f =
   if entry < n && instr.(entry) <> None then dfs entry;
   { n; instr; succs; preds; entry; rpo = Array.of_list !rpo; visited }
 
+(* Loop rotation, LICM and IV widening run one after the other, and
+   usually leave a function unchanged.  Its control-flow graph, natural
+   loops and types are then computed only once: they are memoized,
+   keyed on the physical identity of the function or of its code. *)
+
+module PhysTbl (T: sig type t end) =
+  Ephemeron.K1.Make(struct type t = T.t let equal = (==) let hash = Hashtbl.hash end)
+
+module CodeTbl = PhysTbl(struct type t = code end)
+
+let cfg_memo : (node * cfg) CodeTbl.t = CodeTbl.create 17
+
+let build_cfg f =
+  match CodeTbl.find_opt cfg_memo f.fn_code with
+  | Some (e, g) when P.eq e f.fn_entrypoint -> g
+  | _ ->
+      let g = build_cfg f in
+      CodeTbl.replace cfg_memo f.fn_code (f.fn_entrypoint, g);
+      g
+
 (* Dominators (Cooper, Harvey, Kennedy).  Returns the function
    [dominates a b]. *)
 
@@ -143,15 +165,40 @@ let dominators g =
         rpo
     done
   end;
-  let rec dominates a b =
-    if a = b then true
-    else if b = entry || idom.(b) < 0 then false
-    else dominates a idom.(b) in
+  (* [a] dominates [b] iff [a] is an ancestor of [b] in the dominator
+     tree, which is tested in constant time with the preorder and
+     postorder numbers of a traversal of the tree. *)
+  let children = Array.make n [] in
+  Array.iter (fun u ->
+    if u <> entry && idom.(u) >= 0 then children.(idom.(u)) <- u :: children.(idom.(u)))
+    rpo;
+  let pre = Array.make n (-1) and post = Array.make n (-1) in
+  if Array.length rpo > 0 then begin
+    let clock = ref 0 in
+    let stack = ref [(entry, true)] in
+    while !stack <> [] do
+      let (u, enter) = List.hd !stack in
+      stack := List.tl !stack;
+      if enter then begin
+        pre.(u) <- !clock; incr clock;
+        stack := (u, false) :: !stack;
+        List.iter (fun v -> stack := (v, true) :: !stack) children.(u)
+      end else begin
+        post.(u) <- !clock; incr clock
+      end
+    done
+  end;
+  let dominates a b =
+    a = b
+    || (pre.(a) >= 0 && pre.(b) >= 0 && pre.(a) <= pre.(b) && post.(b) <= post.(a)) in
   dominates
 
-(* Natural loops, merged by header.  Returns a list of (header, body). *)
+(* Natural loops, merged by header.  Returns a list of (header, body,
+   nodes), where [body] is the characteristic array of the loop and
+   [nodes] the array of its nodes in increasing order, along with the
+   dominance relation. *)
 
-let natural_loops g =
+let natural_loops_nodes g =
   let n = g.n and rpo = g.rpo and preds = g.preds and visited = g.visited in
   let dominates = dominators g in
   let bodies = Hashtbl.create 7 in
@@ -159,46 +206,106 @@ let natural_loops g =
   Array.iter (fun u ->
     List.iter (fun h ->
       if h < n && visited.(h) && dominates h u then begin
-        let body =
+        let (body, nodes) =
           match Hashtbl.find_opt bodies h with
           | Some b -> b
           | None ->
-              let b = Array.make n false in
+              let b = (Array.make n false, ref []) in
               Hashtbl.add bodies h b; headers := h :: !headers; b in
-        body.(h) <- true;
+        if not body.(h) then begin body.(h) <- true; nodes := h :: !nodes end;
         let stack = ref [u] in
         while !stack <> [] do
           let x = List.hd !stack in
           stack := List.tl !stack;
           if not body.(x) then begin
             body.(x) <- true;
+            nodes := x :: !nodes;
             List.iter (fun p -> if visited.(p) then stack := p :: !stack) preds.(x)
           end
         done
       end)
       g.succs.(u))
     rpo;
-  List.rev_map (fun h -> (h, Hashtbl.find bodies h)) !headers
+  let loops =
+    List.rev_map (fun h ->
+      let (body, nodes) = Hashtbl.find bodies h in
+      let nodes = Array.of_list !nodes in
+      Array.sort compare nodes;
+      (h, body, nodes)) !headers in
+  (loops, dominates)
+
+(* [true] if the loop of header [h] can only be entered through its header *)
+
+let entered_by_header g h body nodes =
+  (not body.(g.entry) || g.entry = h)
+  && Array.for_all (fun s -> s = h || List.for_all (fun p -> body.(p)) g.preds.(s)) nodes
+
+module CfgTbl = PhysTbl(struct type t = cfg end)
+
+let loops_memo = CfgTbl.create 17
+
+let natural_loops_nodes g =
+  match CfgTbl.find_opt loops_memo g with
+  | Some l -> l
+  | None -> let l = natural_loops_nodes g in CfgTbl.replace loops_memo g l; l
+
+(* Liveness analysis on reachable nodes: the registers live before and
+   after each node.  Computed with a worklist, in postorder. *)
+
+let liveness g =
+  let n = g.n and rpo = g.rpo and instr = g.instr in
+  let live_in = Array.make n IS.empty and live_out = Array.make n IS.empty in
+  let rponum = Array.make n (-1) in
+  Array.iteri (fun k u -> rponum.(u) <- k) rpo;
+  let work = ref IS.empty in
+  Array.iteri (fun k _ -> work := IS.add k !work) rpo;
+  while not (IS.is_empty !work) do
+    let k = IS.max_elt !work in
+    work := IS.remove k !work;
+    let u = rpo.(k) in
+    match instr.(u) with
+    | None -> ()
+    | Some i ->
+        let out =
+          List.fold_left (fun acc s -> if s < n then IS.union acc live_in.(s) else acc)
+            IS.empty g.succs.(u) in
+        live_out.(u) <- out;
+        let defs = List.fold_left (fun acc r -> IS.add (P.to_int r) acc)
+                     IS.empty (defs_all i) in
+        let inn = List.fold_left (fun acc r -> IS.add (P.to_int r) acc)
+                    (IS.diff out defs) (instr_uses i) in
+        if not (IS.equal inn live_in.(u)) then begin
+          live_in.(u) <- inn;
+          List.iter (fun p -> if rponum.(p) >= 0 then work := IS.add rponum.(p) !work)
+            g.preds.(u)
+        end
+  done;
+  (live_in, live_out)
+
+module FunTbl = PhysTbl(struct type t = coq_function end)
+
+let typing_memo = FunTbl.create 17
+
+let type_function f =
+  match FunTbl.find_opt typing_memo f with
+  | Some t -> t
+  | None -> let t = RTLtyping.type_function f in FunTbl.replace typing_memo f t; t
 
 let licm_oracle f =
   let g = build_cfg f in
-  let n = g.n and instr = g.instr and succs = g.succs
+  let n = g.n and instr = g.instr
   and entry = g.entry and rpo = g.rpo in
+  let (nloops, dominates) = natural_loops_nodes g in
+  let rponum = Array.make n (-1) in
+  Array.iteri (fun k u -> rponum.(u) <- k) rpo;
   (* Keep the loops that can only be entered through their header,
      taking unreachable nodes into account *)
-  let valid h body =
-    (not body.(entry) || entry = h)
-    && Array.for_all (fun x -> x) (Array.mapi (fun m s ->
-         body.(m) || List.for_all (fun s -> s >= n || not body.(s) || s = h) s)
-         succs) in
   let loops = ref [] in
-  List.iter (fun (h, body) ->
-    if valid h body then begin
+  List.iter (fun (h, body, nodes) ->
+    if entered_by_header g h body nodes then begin
       let defcount = Hashtbl.create 17 and defnode = Hashtbl.create 17 in
-      let size = ref 0 and hascall = ref false in
-      Array.iteri (fun pc b ->
-        if b then begin
-          incr size;
+      let hascall = ref false in
+      Array.iter (fun pc ->
           match instr.(pc) with
           | Some i ->
               (match i with Icall _ -> hascall := true | _ -> ());
@@ -206,20 +313,23 @@ let licm_oracle f =
                 Hashtbl.replace defcount r
                   (1 + Option.value ~default:0 (Hashtbl.find_opt defcount r));
                 Hashtbl.replace defnode r pc) (defs_all i)
-          | None -> ()
-        end) body;
-      loops := { header = h; body; size = !size; hascall = !hascall;
+          | None -> ()) nodes;
+      let rnodes = Array.copy nodes in
+      Array.sort (fun x y -> compare rponum.(x) rponum.(y)) rnodes;
+      loops := { header = h; body; nodes; rnodes; size = Array.length nodes; hascall = !hascall;
                  defcount; defnode; cands = Hashtbl.create 17;
                  hoisted = Hashtbl.create 7; chain = [] } :: !loops
-    end) (natural_loops g);
+    end) nloops;
   (* Outermost loops first *)
   let loops = List.sort (fun l1 l2 -> compare l2.size l1.size) !loops in
-  match loops, RTLtyping.type_function f with
-  | [], _ | _, Errors.Error _ -> ([], PTree.empty), PTree.empty
-  | _, Errors.OK env ->
+  match loops with
+  | [] -> ([], PTree.empty), PTree.empty
+  | _ ->
+  match type_function f with
+  | Errors.Error _ -> ([], PTree.empty), PTree.empty
+  | Errors.OK env ->
   let is_float r =
     match env r with AST.Tfloat | AST.Tsingle -> true | _ -> false in
-  let dominates = dominators g in
   let defcount l r = Option.value ~default:0 (Hashtbl.find_opt l.defcount r) in
   (* Loop-invariant operations of each loop, as a fixpoint: their arguments
      are defined outside the loop, by a loop-invariant operation that
@@ -229,7 +339,7 @@ let licm_oracle f =
     while !changed do
       changed := false;
       Array.iter (fun x ->
-        if l.body.(x) && not (Hashtbl.mem l.cands x) then
+        if not (Hashtbl.mem l.cands x) then
         match instr.(x) with
         | Some (Iop (op, args, res, _)) when hoistable op args && defcount l res = 1 ->
             let source a =
@@ -250,32 +360,10 @@ let licm_oracle f =
               changed := true
             end
         | _ -> ())
-        rpo
+        l.rnodes
     done) loops;
-  (* Liveness analysis, to estimate register pressure *)
-  let live_out = Array.make n IS.empty in
-  let live_in = Array.make n IS.empty in
-  let changed = ref true in
-  while !changed do
-    changed := false;
-    for k = Array.length rpo - 1 downto 0 do
-      let u = rpo.(k) in
-      match instr.(u) with
-      | None -> ()
-      | Some i ->
-          let out =
-            List.fold_left (fun acc s -> if s < n then IS.union acc live_in.(s) else acc)
-              IS.empty succs.(u) in
-          live_out.(u) <- out;
-          let defs = List.fold_left (fun acc r -> IS.add (P.to_int r) acc)
-                       IS.empty (defs_all i) in
-          let inn = List.fold_left (fun acc r -> IS.add (P.to_int r) acc)
-                      (IS.diff out defs) (instr_uses i) in
-          if not (IS.equal inn live_in.(u)) then begin
-            live_in.(u) <- inn; changed := true
-          end
-    done
-  done;
+  (* Liveness analysis, to estimate register pressure, computed on demand *)
+  let live_out = lazy (snd (liveness g)) in
   let count_class fl s =
     IS.fold (fun r c -> if is_float (P.of_int r) = fl then c + 1 else c) s 0 in
   (* Register pressure at each node, for each class, including the
@@ -293,13 +381,22 @@ let licm_oracle f =
     | Some r -> r
     | None ->
         let r = ref IS.empty in
-        Array.iteri (fun pc b ->
-          if b then match instr.(pc) with
+        Array.iter (fun pc ->
+          match instr.(pc) with
             | Some i ->
                 List.iter (fun x -> r := IS.add (P.to_int x) !r) (instr_uses i @ defs_all i)
-            | None -> ()) l.body;
+            | None -> ()) l.nodes;
         Hashtbl.add refs l.header !r; !r in
-  let pressure l fl pc = count_class fl (IS.inter live_out.(pc) (refs_of l)) in
+  let pressure l fl pc = count_class fl (IS.inter (Lazy.force live_out).(pc) (refs_of l)) in
+  (* The pressures at the nodes of a loop, in the order of [l.nodes],
+     for the integer and the floating-point classes *)
+  let pressures = Hashtbl.create 7 in
+  let pressures_of l =
+    match Hashtbl.find_opt pressures l.header with
+    | Some p -> p
+    | None ->
+        let p = (Array.map (pressure l false) l.nodes, Array.map (pressure l true) l.nodes) in
+        Hashtbl.add pressures l.header p; p in
   (* Users of each register *)
   let users = Hashtbl.create 97 in
   Array.iteri (fun pc i ->
@@ -367,20 +464,20 @@ let licm_oracle f =
           (if is_float (dest y) then incr dfloat else incr dint)) !fresh;
       let fits =
         not l.hascall &&
-        (let ok = ref true in
-         Array.iteri (fun pc b ->
-           if b && !ok then
-             ok := (!dint = 0 || pressure l false pc + extra_int.(pc) + !dint <= max_pressure_int)
+        (!dint = 0 && !dfloat = 0 ||
+         let (pint, pfloat) = pressures_of l in
+         let ok = ref true in
+         Array.iteri (fun k pc ->
+           if !ok then
+             ok := (!dint = 0 || pint.(k) + extra_int.(pc) + !dint <= max_pressure_int)
                    && (!dfloat = 0
-                       || pressure l true pc + extra_float.(pc) + !dfloat <= max_pressure_float))
-           l.body;
+                       || pfloat.(k) + extra_float.(pc) + !dfloat <= max_pressure_float))
+           l.nodes;
          !ok) in
       if fits then begin
-        Array.iteri (fun pc b ->
-          if b then begin
+        Array.iter (fun pc ->
             extra_int.(pc) <- extra_int.(pc) + !dint;
-            extra_float.(pc) <- extra_float.(pc) + !dfloat
-          end) l.body;
+            extra_float.(pc) <- extra_float.(pc) + !dfloat) l.nodes;
         List.iter (fun ((op, hargs), t, _) ->
           let p = !next_pc in
           next_pc := P.succ p;
@@ -394,8 +491,10 @@ let licm_oracle f =
     end in
   (* Candidates whose results are used by other instructions than
      candidates are the roots of the chains to be hoisted. *)
+  let is_cand = Array.make n false in
+  List.iter (fun l -> Hashtbl.iter (fun x _ -> is_cand.(x) <- true) l.cands) loops;
   Array.iter (fun x ->
-    if not (Hashtbl.mem selected x) then begin
+    if is_cand.(x) && not (Hashtbl.mem selected x) then begin
       let inloops = List.filter (fun l -> Hashtbl.mem l.cands x) loops in
       let is_root l =
         List.exists (fun y -> not (l.body.(y) && Hashtbl.mem l.cands y))
@@ -471,7 +570,8 @@ let licm_oracle f =
       List.iter (Hashtbl.remove selected) bad;
       compute ()
     end in
-  compute ();
+  (* Without replaced operations, there are no equations *)
+  if Hashtbl.length selected > 0 then compute ();
   let repl = Hashtbl.fold (fun x (_, t) acc -> PTree.set (P.of_int x) t acc) selected PTree.empty in
   let eqtree = ref PTree.empty in
   Array.iteri (fun pc e ->
@@ -482,7 +582,7 @@ let licm_oracle f =
     List.filter_map (fun l ->
       if l.chain = [] then None else begin
         let body = ref PTree.empty in
-        Array.iteri (fun pc b -> if b then body := PTree.set (P.of_int pc) () !body) l.body;
+        Array.iter (fun pc -> body := PTree.set (P.of_int pc) () !body) l.nodes;
         Some ((P.of_int l.header, !body), List.rev l.chain)
       end)
       loops in

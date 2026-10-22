@@ -215,7 +215,18 @@ Qed.
 Lemma transf_function_tr:
   forall f, exists loops repl eqs, tr_function f loops repl eqs (transf_function f).
 Proof.
-  intros. unfold transf_function. destruct (licm_oracle f) as [[lps repl] eqs].
+  intros.
+  assert (ID: exists loops repl eqs, tr_function f loops repl eqs f).
+  { exists nil, (PTree.empty _), (PTree.empty _).
+    constructor; simpl; intros; auto;
+      try contradiction; try constructor;
+      try (unfold eqs_at in *; rewrite PTree.gempty in *; first [discriminate | contradiction]).
+    unfold transf_instr, replace_instr. rewrite PTree.gempty. rewrite map_succ_id. auto. }
+  assert (LOOPS: forall lps (rp: PTree.t reg) (eq0: PTree.t (list (reg * reg))), exists loops repl eqs,
+                   tr_function f loops repl eqs (transf_function_loops f lps rp eq0)).
+  2: { unfold transf_function. destruct (licm_oracle f) as [[lps repl] eqs].
+       destruct lps; [exact ID | apply LOOPS]. }
+  intros lps repl eqs. unfold transf_function_loops.
   set (loops := map (fun x => let '(h, b, ch) := x in mkloop h b ch) lps).
   set (tc := transf_code f loops repl).
   set (entry := redirect (fun _ => false) loops f.(fn_entrypoint)).
@@ -278,11 +289,7 @@ Proof.
     subst; auto.
   + (* entry equations *)
     destruct (eqs_at eqs entry); [auto | discriminate].
-- exists nil, (PTree.empty _), (PTree.empty _).
-  constructor; simpl; intros; auto;
-    try contradiction; try constructor;
-    try (unfold eqs_at in *; rewrite PTree.gempty in *; first [discriminate | contradiction]).
-  unfold transf_instr, replace_instr. rewrite PTree.gempty. rewrite map_succ_id. auto.
+- exact ID.
 Qed.
 
 (** * Semantic preservation *)

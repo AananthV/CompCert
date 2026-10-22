@@ -150,8 +150,7 @@ Definition transf_rtl_program (f: RTL.program) : res Asm.program :=
    @@ total_if Compopts.optim_licm (time "Loop-invariant code motion" LICM.transf_program)
    @@ total_if Compopts.optim_ivwiden (time "Induction-variable widening" IVwiden.transf_program)
    @@ time "Renumbering" Renumber.transf_program
-   @@ total_if Compopts.optim_loadfwd (time "Load forwarding (moves)" Loadfwd.insert_program)
-   @@ total_if Compopts.optim_loadfwd (time "Load forwarding" Loadfwd.transf_program)
+   @@ total_if Compopts.optim_loadfwd (time "Load forwarding" Loadfwd.fwd_program)
   @@@ partial_if Compopts.optim_CSE (time "CSE" CSE.transf_program)
    @@ print (print_RTL 10)
   @@@ partial_if Compopts.optim_redundancy (time "Redundancy elimination" Deadcode.transf_program)
@@ -213,6 +212,14 @@ Qed.
 
 Definition match_if {A: Type} (flag: unit -> bool) (R: A -> A -> Prop): A -> A -> Prop :=
   if flag tt then R else eq.
+
+Lemma total_if_fwd:
+  forall p,
+  total_if optim_loadfwd Loadfwd.fwd_program p =
+  total_if optim_loadfwd Loadfwd.transf_program (total_if optim_loadfwd Loadfwd.insert_program p).
+Proof.
+  intros. unfold total_if. destruct (optim_loadfwd tt); auto. apply Loadfwd.fwd_program_eq.
+Qed.
 
 Lemma total_if_match:
   forall (A: Type) (flag: unit -> bool) (f: A -> A) (rel: A -> A -> Prop) (prog: A),
@@ -323,6 +330,7 @@ Proof.
   set (p15l := total_if optim_licm LICM.transf_program p15r) in *.
   set (p15i := total_if optim_ivwiden IVwiden.transf_program p15l) in *.
   set (p15n := Renumber.transf_program p15i) in *.
+  rewrite total_if_fwd in T.
   set (p15a := total_if optim_loadfwd Loadfwd.insert_program p15n) in *.
   set (p15b := total_if optim_loadfwd Loadfwd.transf_program p15a) in *.
   destruct (partial_if optim_CSE CSE.transf_program p15b) as [p16|e] eqn:P16; simpl in T; try discriminate.

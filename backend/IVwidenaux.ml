@@ -193,9 +193,9 @@ let add_edge edges u s gi =
 
 let iv_oracle f =
   let none = ((([], PTree.empty), PTree.empty), PTree.empty) in
-  match mk_sext, mk_addl, RTLtyping.type_function f with
-  | None, _, _ | _, None, _ | _, _, Errors.Error _ -> none
-  | Some sext_op, Some addl_op, Errors.OK env ->
+  match mk_sext, mk_addl with
+  | None, _ | _, None -> none
+  | Some sext_op, Some addl_op ->
   let g = LICMaux.build_cfg f in
   let n = g.LICMaux.n and instr = g.LICMaux.instr and entry = g.LICMaux.entry in
   let succs = g.LICMaux.succs and preds = g.LICMaux.preds in
@@ -209,15 +209,20 @@ let iv_oracle f =
     g.LICMaux.rpo;
   if n * !nheaders > max_size then none else
   (* Loops that can only be entered through their header, outermost first *)
-  let valid h body =
-    h <> entry && not body.(entry)
-    && Array.for_all (fun x -> x) (Array.mapi (fun m s ->
-         body.(m) || List.for_all (fun s -> s >= n || not body.(s) || s = h) s) succs) in
-  let size body = Array.fold_left (fun c b -> if b then c + 1 else c) 0 body in
-  let loops =
-    List.sort (fun (_, b1) (_, b2) -> compare (size b2) (size b1))
-      (List.filter (fun (h, b) -> valid h b) (LICMaux.natural_loops g)) in
-  if loops = [] then none else begin
+  let nloops =
+    List.sort (fun (_, _, n1) (_, _, n2) -> compare (Array.length n2) (Array.length n1))
+      (List.filter (fun (h, b, nodes) -> h <> entry && LICMaux.entered_by_header g h b nodes)
+         (fst (LICMaux.natural_loops_nodes g))) in
+  let loops = List.map (fun (h, b, _) -> (h, b)) nloops in
+  (* The nodes of a loop body, in increasing order *)
+  let nodes_of body =
+    match List.find_opt (fun (_, b, _) -> b == body) nloops with
+    | Some (_, _, nodes) -> nodes
+    | None -> assert false in
+  if loops = [] then none else
+  match LICMaux.type_function f with
+  | Errors.Error _ -> none
+  | Errors.OK env -> begin
   let mr = max_reg_function f in
   let next_reg = ref (P.succ mr) in
   let fresh_reg () = let r = !next_reg in next_reg := P.succ r; r in
@@ -225,25 +230,9 @@ let iv_oracle f =
   let is_new r = P.lt mr r in
   (* Liveness analysis on the original code, for the cost heuristics *)
   let module IS = Set.Make(Int) in
-  let rpo = g.LICMaux.rpo in
-  let live_in = Array.make n IS.empty and live_out = Array.make n IS.empty in
-  let changed = ref true in
-  while !changed do
-    changed := false;
-    for k = Array.length rpo - 1 downto 0 do
-      let u = rpo.(k) in
-      match instr.(u) with
-      | None -> ()
-      | Some i ->
-          let out = List.fold_left (fun acc s -> if s < n then IS.union acc live_in.(s) else acc)
-                      IS.empty succs.(u) in
-          live_out.(u) <- out;
-          let defs = List.fold_left (fun acc r -> IS.add (P.to_int r) acc) IS.empty (LICMaux.defs_all i) in
-          let inn = List.fold_left (fun acc r -> IS.add (P.to_int r) acc)
-                      (IS.diff out defs) (instr_uses i) in
-          if not (IS.equal inn live_in.(u)) then begin live_in.(u) <- inn; changed := true end
-    done
-  done;
+  let liveness = lazy (LICMaux.liveness g) in
+  let live_in s = (fst (Lazy.force liveness)).(s)
+  and live_out s = (snd (Lazy.force liveness)).(s) in
   let is_int_class r = match env (P.of_int r) with Tfloat | Tsingle -> false | _ -> true in
   let users = Hashtbl.create 97 in
   Array.iteri (fun pc i ->
@@ -259,19 +248,19 @@ let iv_oracle f =
       | None -> let x = compute body in cache := (body, x) :: !cache; x in
   let defs_of = memo_body (fun body ->
     let h = Hashtbl.create 17 in
-    Array.iteri (fun pc b ->
-      if b then match instr.(pc) with
+    Array.iter (fun pc ->
+      match instr.(pc) with
         | Some i -> List.iter (fun r -> Hashtbl.replace h r ()) (LICMaux.defs_all i)
-        | None -> ()) body;
+        | None -> ()) (nodes_of body);
     h) in
   let defined_in body r = Hashtbl.mem (defs_of body) r in
   let exits_of = memo_body (fun body ->
     let l = ref [] in
-    Array.iteri (fun pc b ->
-      if b then List.iter (fun s -> if s < n && not body.(s) then l := s :: !l) succs.(pc)) body;
+    Array.iter (fun pc ->
+      List.iter (fun s -> if s < n && not body.(s) then l := s :: !l) succs.(pc)) (nodes_of body);
     List.sort_uniq compare !l) in
   let live_at_exit body r =
-    List.exists (fun s -> IS.mem (P.to_int r) live_in.(s)) (exits_of body) in
+    List.exists (fun s -> IS.mem (P.to_int r) (live_in s)) (exits_of body) in
   let is_sext_of t pc =
     match instr.(pc) with
     | Some (Iop (op, args, res, _)) ->
@@ -281,42 +270,45 @@ let iv_oracle f =
      the loop and referenced in the loop *)
   let base_pressure = memo_body (fun body ->
     let rf = ref IS.empty in
-    Array.iteri (fun pc b ->
-      if b then match instr.(pc) with
+    let nodes = nodes_of body in
+    Array.iter (fun pc ->
+      match instr.(pc) with
         | Some i -> List.iter (fun x -> rf := IS.add (P.to_int x) !rf) (instr_uses i @ LICMaux.defs_all i)
-        | None -> ()) body;
+        | None -> ()) nodes;
     let rf = IS.filter is_int_class !rf in
-    Array.mapi (fun pc b -> if b then IS.cardinal (IS.inter live_out.(pc) rf) else 0) body) in
+    Array.map (fun pc -> IS.cardinal (IS.inter (live_out pc) rf)) nodes) in
   let extra = Array.make n 0 in
+  (* [base_pressure body] is indexed like [nodes_of body] *)
   let pressure body =
     let bp = base_pressure body in
     let p = ref 0 in
-    Array.iteri (fun pc b -> if b then p := max !p (bp.(pc) + extra.(pc))) body;
+    Array.iteri (fun k pc -> p := max !p (bp.(k) + extra.(pc))) (nodes_of body);
     !p in
   (* In loops that contain calls, the registers live across the calls must
      be callee-save: do not increase the register pressure *)
   let has_call = memo_body (fun body ->
-    Array.exists (fun x -> x) (Array.mapi (fun pc b ->
-      b && match instr.(pc) with Some (Icall _) -> true | _ -> false) body)) in
+    Array.exists (fun pc ->
+      match instr.(pc) with Some (Icall _) -> true | _ -> false) (nodes_of body)) in
   let limit body = if has_call body then 0 else max_pressure_int in
   let charge body cost =
-    Array.iteri (fun pc b -> if b then extra.(pc) <- extra.(pc) + cost) body in
+    Array.iter (fun pc -> extra.(pc) <- extra.(pc) + cost) (nodes_of body) in
   (* Choose the induction variables, each in the outermost loop where it
      is incremented exactly once *)
   let assigned = Hashtbl.create 7 in
   let cands = ref [] in
   List.iter (fun (h, body) ->
+    let nodes = nodes_of body in
     let defcount = Hashtbl.create 17 in
-    Array.iteri (fun pc b ->
-      if b then match instr.(pc) with
+    Array.iter (fun pc ->
+      match instr.(pc) with
         | Some i ->
             List.iter (fun r ->
               Hashtbl.replace defcount r (1 + Option.value ~default:0 (Hashtbl.find_opt defcount r)))
               (LICMaux.defs_all i)
-        | None -> ()) body;
+        | None -> ()) nodes;
     let defs r = Option.value ~default:0 (Hashtbl.find_opt defcount r) in
-    Array.iteri (fun pc b ->
-      if b then match instr.(pc) with
+    Array.iter (fun pc ->
+      match instr.(pc) with
         | Some (Iop (op, args, res, _)) ->
             (match classify_op op args with
              | OCaddimm (a, c) when P.eq a res && defs res = 1 && is_int res
@@ -325,7 +317,7 @@ let iv_oracle f =
                  cands := { ivreg = res; lreg = fresh_reg (); header = h; body;
                             incr = pc; step = c } :: !cands
              | _ -> ())
-        | _ -> ()) body)
+        | _ -> ()) nodes)
     loops;
   (* The 32-bit variables sign-extended in the loop ([iv] or [iv + c]),
      the registers needed for the bounds of the comparisons, and whether
@@ -391,13 +383,13 @@ let iv_oracle f =
        loops *)
     let addr = Hashtbl.create 17 in
     List.iter (fun v ->
-      Array.iteri (fun pc b ->
-        if b then match instr.(pc) with
+      Array.iter (fun pc ->
+        match instr.(pc) with
           | Some (Iload (_, _, args, _, _)) | Some (Istore (_, _, args, _, _)) ->
               List.iter (fun a -> Hashtbl.replace addr a ()) args
-          | _ -> ()) v.body) ivs;
+          | _ -> ()) (nodes_of v.body)) ivs;
     (* Facts about registers of the function that are dead are useless *)
-    let live s x = is_new x || s >= n || IS.mem (P.to_int x) live_in.(s) in
+    let live s x = is_new x || s >= n || IS.mem (P.to_int x) (live_in s) in
     fun s f ->
       match f with
       | Flin (x, _, i, _, _) -> Hashtbl.mem r i && live s x
@@ -444,8 +436,8 @@ let iv_oracle f =
             Hashtbl.add bounds (v.header, r) lr;
             init (lr, sext_op, [r]);
             lr in
-      Array.iteri (fun pc b ->
-        if b && PTree.get (P.of_int pc) !hints = None then
+      Array.iter (fun pc ->
+        if PTree.get (P.of_int pc) !hints = None then
           match instr.(pc) with
           | Some (Icond (cond, args, _, _)) ->
               let h =
@@ -462,7 +454,7 @@ let iv_oracle f =
                     Some (Hcond (v.lreg, v.lreg))
                 | _ -> None in
               (match h with Some h -> hints := PTree.set (P.of_int pc) h !hints | None -> ())
-          | _ -> ()) body)
+          | _ -> ()) (nodes_of body))
       ivs;
     (* New nodes on the edges *)
     let next_pc = ref (P.of_int n) in
