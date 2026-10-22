@@ -110,6 +110,8 @@ Definition needs_of_operation (op: operation) (nv: nval): list nval :=
   | Olongoffloat | Ofloatoflong | Olongofsingle | Osingleoflong => op1 (default nv)
   | Ocmp c => needs_of_condition c
   | Osel c ty => nv :: nv :: needs_of_condition c
+  | Oshlmask | Oshrmask | Oshrumask
+  | Oshllmask | Oshrlmask | Oshrlumask => op2 (default nv)
   end.
 
 Definition operation_is_redundant (op: operation) (nv: nval): bool :=

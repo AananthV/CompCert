@@ -652,6 +652,32 @@ Definition transl_op
       assertion (mreg_eq a1 res);
       do r <- ireg_of res; do r2 <- ireg_of a2;
       transl_sel c args r r2 k
+(* The hardware masks the count of a shift by [%cl], so the masked
+   shifts are plain shifts by [%cl]. *)
+  | Oshlmask, a1 :: a2 :: nil =>
+      assertion (mreg_eq a1 res);
+      assertion (mreg_eq a2 CX);
+      do r <- ireg_of res; OK (Psall_rcl r :: k)
+  | Oshrmask, a1 :: a2 :: nil =>
+      assertion (mreg_eq a1 res);
+      assertion (mreg_eq a2 CX);
+      do r <- ireg_of res; OK (Psarl_rcl r :: k)
+  | Oshrumask, a1 :: a2 :: nil =>
+      assertion (mreg_eq a1 res);
+      assertion (mreg_eq a2 CX);
+      do r <- ireg_of res; OK (Pshrl_rcl r :: k)
+  | Oshllmask, a1 :: a2 :: nil =>
+      assertion (mreg_eq a1 res);
+      assertion (mreg_eq a2 CX);
+      do r <- ireg_of res; OK (Psalq_rcl r :: k)
+  | Oshrlmask, a1 :: a2 :: nil =>
+      assertion (mreg_eq a1 res);
+      assertion (mreg_eq a2 CX);
+      do r <- ireg_of res; OK (Psarq_rcl r :: k)
+  | Oshrlumask, a1 :: a2 :: nil =>
+      assertion (mreg_eq a1 res);
+      assertion (mreg_eq a2 CX);
+      do r <- ireg_of res; OK (Pshrq_rcl r :: k)
   | _, _ =>
       Error(msg "Asmgen.transl_op")
   end.

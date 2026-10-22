@@ -385,7 +385,11 @@ Proof.
   unfold shll. destruct Archi.splitlong eqn:SL. apply SplitLongproof.eval_shll; auto.
   red; intros. destruct (is_intconst b) as [n2|] eqn:C.
 - exploit is_intconst_sound; eauto. intros EQ; subst y. apply eval_shllimm; auto.
-- TrivialExists.
+- destruct (masked_count (Int.repr 63) b) as [t|] eqn:M.
++ exploit eval_masked_count; eauto. intros (v & A & B).
+  exists (Val.shll x (Val.and v (Vint (Int.repr 63)))); split. EvalOp.
+  inv B; auto. destruct x; auto.
++ TrivialExists.
 Qed.
 
 Theorem eval_shrlu: binary_constructor_sound shrlu Val.shrlu.
@@ -393,7 +397,11 @@ Proof.
   unfold shrlu. destruct Archi.splitlong eqn:SL. apply SplitLongproof.eval_shrlu; auto.
   red; intros. destruct (is_intconst b) as [n2|] eqn:C.
 - exploit is_intconst_sound; eauto. intros EQ; subst y. apply eval_shrluimm; auto.
-- TrivialExists.
+- destruct (masked_count (Int.repr 63) b) as [t|] eqn:M.
++ exploit eval_masked_count; eauto. intros (v & A & B).
+  exists (Val.shrlu x (Val.and v (Vint (Int.repr 63)))); split. EvalOp.
+  inv B; auto. destruct x; auto.
++ TrivialExists.
 Qed.
 
 Theorem eval_shrl: binary_constructor_sound shrl Val.shrl.
@@ -401,7 +409,11 @@ Proof.
   unfold shrl. destruct Archi.splitlong eqn:SL. apply SplitLongproof.eval_shrl; auto.
   red; intros. destruct (is_intconst b) as [n2|] eqn:C.
 - exploit is_intconst_sound; eauto. intros EQ; subst y. apply eval_shrlimm; auto.
-- TrivialExists.
+- destruct (masked_count (Int.repr 63) b) as [t|] eqn:M.
++ exploit eval_masked_count; eauto. intros (v & A & B).
+  exists (Val.shrl x (Val.and v (Vint (Int.repr 63)))); split. EvalOp.
+  inv B; auto. destruct x; auto.
++ TrivialExists.
 Qed.
 
 Theorem eval_negl: unary_constructor_sound negl Val.negl.

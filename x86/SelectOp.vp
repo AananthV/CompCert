@@ -346,22 +346,60 @@ Definition shrximm (e1: expr) (n2: int) :=
 
 (** ** General shifts *)
 
-Nondetfunction shl (e1: expr) (e2: expr) :=
+Nondetfunction shl_base (e1: expr) (e2: expr) :=
   match e2 with
   | Eop (Ointconst n2) Enil => shlimm e1 n2
   | _ => Eop Oshl (e1:::e2:::Enil)
   end.
 
-Nondetfunction shr (e1: expr) (e2: expr) :=
+Nondetfunction shr_base (e1: expr) (e2: expr) :=
   match e2 with
   | Eop (Ointconst n2) Enil => shrimm e1 n2
   | _ => Eop Oshr (e1:::e2:::Enil)
   end.
 
-Nondetfunction shru (e1: expr) (e2: expr) :=
+Nondetfunction shru_base (e1: expr) (e2: expr) :=
   match e2 with
   | Eop (Ointconst n2) Enil => shruimm e1 n2
   | _ => Eop Oshru (e1:::e2:::Enil)
+  end.
+
+(** With [-fshift-mask], a shift whose count is explicitly masked,
+  as in [x << (y & 31)], uses a masked shift operator.  The hardware
+  masks the count of a shift by [%cl] itself, so the [and] disappears.
+  [masked_count n e] returns [t] if [e] is [t & n], or the low word of
+  a 64-bit [t & n], as for [x << (i % 32)] with [i] of type [size_t]. *)
+
+Nondetfunction masked_count_base (n: int) (e: expr) :=
+  match e with
+  | Eop (Oandimm m) (t:::Enil) =>
+      if Int.eq m n then Some t else None
+  | Eop Olowlong (Eop (Oandlimm m) (Eop Ocast32unsigned (t:::Enil):::Enil):::Enil) =>
+      if Int64.eq m (Int64.repr (Int.unsigned n)) then Some t else None
+  | Eop Olowlong (Eop (Oandlimm m) (t:::Enil):::Enil) =>
+      if Int64.eq m (Int64.repr (Int.unsigned n)) then Some (Eop Olowlong (t:::Enil)) else None
+  | _ => None
+  end.
+
+Definition masked_count (n: int) (e: expr) : option expr :=
+  if Compopts.optim_shiftmask tt then masked_count_base n e else None.
+
+Definition shl (e1: expr) (e2: expr) :=
+  match masked_count (Int.repr 31) e2 with
+  | Some t2 => Eop Oshlmask (e1:::t2:::Enil)
+  | None => shl_base e1 e2
+  end.
+
+Definition shr (e1: expr) (e2: expr) :=
+  match masked_count (Int.repr 31) e2 with
+  | Some t2 => Eop Oshrmask (e1:::t2:::Enil)
+  | None => shr_base e1 e2
+  end.
+
+Definition shru (e1: expr) (e2: expr) :=
+  match masked_count (Int.repr 31) e2 with
+  | Some t2 => Eop Oshrumask (e1:::t2:::Enil)
+  | None => shru_base e1 e2
   end.
 
 (** ** Floating-point arithmetic *)

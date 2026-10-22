@@ -1305,6 +1305,57 @@ Ltac TranslOp :=
   [ apply exec_straight_one; [ simpl; eauto | auto ]
   | split; [ Simplifs | intros; Simplifs ]].
 
+(** Shifts by [%cl]: the count is masked as by the hardware.  This
+  refines the unmasked shifts of [Op], and is the semantics of the
+  masked shifts of [Op]. *)
+
+Remark mask_small:
+  forall i n logn, Int.is_power2 n = Some logn ->
+  Int.ltu i n = true -> Int.and i (Int.sub n Int.one) = i.
+Proof.
+  intros. rewrite <- (Int.modu_and i n logn) by auto.
+  unfold Int.ltu in H0. destruct (zlt (Int.unsigned i) (Int.unsigned n)); try discriminate.
+  unfold Int.modu. rewrite Z.mod_small. apply Int.repr_unsigned.
+  generalize (Int.unsigned_range i); lia.
+Qed.
+
+Remark mask31_small:
+  forall i, Int.ltu i Int.iwordsize = true -> Int.and i (Int.repr 31) = i.
+Proof.
+  intros. exact (mask_small i Int.iwordsize (Int.repr 5) (eq_refl _) H).
+Qed.
+
+Remark mask63_small:
+  forall i, Int.ltu i Int64.iwordsize' = true -> Int.and i (Int.repr 63) = i.
+Proof.
+  intros. exact (mask_small i Int64.iwordsize' (Int.repr 6) (eq_refl _) H).
+Qed.
+
+Lemma shift_mask_lessdef:
+  forall x y,
+     Val.lessdef (Val.shl x y) (Val.shl x (Val.and y (Vint (Int.repr 31))))
+  /\ Val.lessdef (Val.shr x y) (Val.shr x (Val.and y (Vint (Int.repr 31))))
+  /\ Val.lessdef (Val.shru x y) (Val.shru x (Val.and y (Vint (Int.repr 31))))
+  /\ Val.lessdef (Val.shll x y) (Val.shll x (Val.and y (Vint (Int.repr 63))))
+  /\ Val.lessdef (Val.shrl x y) (Val.shrl x (Val.and y (Vint (Int.repr 63))))
+  /\ Val.lessdef (Val.shrlu x y) (Val.shrlu x (Val.and y (Vint (Int.repr 63)))).
+Proof.
+  intros. destruct x; destruct y; simpl; intuition auto.
+- destruct (Int.ltu i0 Int.iwordsize) eqn:L; auto. rewrite mask31_small, L by auto; auto.
+- destruct (Int.ltu i0 Int.iwordsize) eqn:L; auto. rewrite mask31_small, L by auto; auto.
+- destruct (Int.ltu i0 Int.iwordsize) eqn:L; auto. rewrite mask31_small, L by auto; auto.
+- destruct (Int.ltu i0 Int64.iwordsize') eqn:L; auto. rewrite mask63_small, L by auto; auto.
+- destruct (Int.ltu i0 Int64.iwordsize') eqn:L; auto. rewrite mask63_small, L by auto; auto.
+- destruct (Int.ltu i0 Int64.iwordsize') eqn:L; auto. rewrite mask63_small, L by auto; auto.
+Qed.
+
+Ltac TranslShift :=
+  econstructor; split;
+  [ apply exec_straight_one; [ simpl; eauto | auto ]
+  | split; [ rewrite nextinstr_nf_inv by auto with asmgen; rewrite Pregmap.gss;
+             edestruct shift_mask_lessdef as (? & ? & ? & ? & ? & ?); eassumption
+           | intros; Simplifs ]].
+
 Lemma transl_op_correct:
   forall op args res k c (rs: regset) m v,
   transl_op op args res k = OK c ->
@@ -1329,7 +1380,7 @@ Transparent destroyed_by_op.
     intros [rs' [A [B C]]]. subst v. exists rs'; auto.
   }
 
-  destruct op; simpl in TR; ArgsInv; simpl in EV; try (inv EV); try (apply SAME; TranslOp; fail).
+  destruct op; simpl in TR; ArgsInv; simpl in EV; try (inv EV); try (apply SAME; TranslOp; fail); try (TranslShift; fail).
 (* move *)
   exploit mk_mov_correct; eauto. intros [rs2 [A [B C]]].
   apply SAME. exists rs2. eauto.

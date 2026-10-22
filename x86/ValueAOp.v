@@ -166,6 +166,12 @@ Definition eval_static_operation (op: operation) (vl: list aval): aval :=
   | Osingleoflong, v1::nil => singleoflong v1
   | Ocmp c, _ => of_optbool (eval_static_condition c vl)
   | Osel c ty, v1::v2::vl => select (eval_static_condition c vl) v1 v2 ty
+  | Oshlmask, v1::v2::nil => shl v1 (and v2 (I (Int.repr 31)))
+  | Oshrmask, v1::v2::nil => shr v1 (and v2 (I (Int.repr 31)))
+  | Oshrumask, v1::v2::nil => shru v1 (and v2 (I (Int.repr 31)))
+  | Oshllmask, v1::v2::nil => shll v1 (and v2 (I (Int.repr 63)))
+  | Oshrlmask, v1::v2::nil => shrl v1 (and v2 (I (Int.repr 63)))
+  | Oshrlumask, v1::v2::nil => shrlu v1 (and v2 (I (Int.repr 63)))
   | _, _ => Vbot
   end.
 

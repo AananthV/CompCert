@@ -254,21 +254,33 @@ Definition shll (e1: expr) (e2: expr) :=
   if Archi.splitlong then SplitLong.shll e1 e2 else
   match is_intconst e2 with
   | Some n2 => shllimm e1 n2
-  | None => Eop Oshll (e1:::e2:::Enil)
+  | None =>
+      match masked_count (Int.repr 63) e2 with
+      | Some t2 => Eop Oshllmask (e1:::t2:::Enil)
+      | None => Eop Oshll (e1:::e2:::Enil)
+      end
   end.
 
 Definition shrl (e1: expr) (e2: expr) :=
   if Archi.splitlong then SplitLong.shrl e1 e2 else
   match is_intconst e2 with
   | Some n2 => shrlimm e1 n2
-  | None => Eop Oshrl (e1:::e2:::Enil)
+  | None =>
+      match masked_count (Int.repr 63) e2 with
+      | Some t2 => Eop Oshrlmask (e1:::t2:::Enil)
+      | None => Eop Oshrl (e1:::e2:::Enil)
+      end
   end.
 
 Definition shrlu (e1: expr) (e2: expr) :=
   if Archi.splitlong then SplitLong.shrlu e1 e2 else
   match is_intconst e2 with
   | Some n2 => shrluimm e1 n2
-  | _ => Eop Oshrlu (e1:::e2:::Enil)
+  | None =>
+      match masked_count (Int.repr 63) e2 with
+      | Some t2 => Eop Oshrlumask (e1:::t2:::Enil)
+      | None => Eop Oshrlu (e1:::e2:::Enil)
+      end
   end.
 
 Nondetfunction addlimm (n: int64) (e: expr) :=
