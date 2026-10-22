@@ -103,6 +103,64 @@ Function combine_addr_64 (addr: addressing) (args: list valnum) : option(address
 Definition combine_addr (addr: addressing) (args: list valnum) : option(addressing * list valnum) :=
   if Archi.ptr64 then combine_addr_64 addr args else combine_addr_32 addr args.
 
+(** Recognition of rotates [(x << n1) | (x >>u n2)] with [n1 + n2] equal
+  to the word size.  This complements the recognition performed during
+  instruction selection, which only applies when both shifts are applied
+  to the same variable.  Small left shifts are recognized also when
+  they have been turned into [lea] instructions. *)
+
+Definition scale_shift (sc ofs: Z) : option int :=
+  if zeq ofs 0 then
+    if zeq sc 2 then Some (Int.repr 1)
+    else if zeq sc 4 then Some (Int.repr 2)
+    else if zeq sc 8 then Some (Int.repr 3)
+    else None
+  else None.
+
+Definition shl_of (x: valnum) : option (int * valnum) :=
+  match get x with
+  | Some(Op (Oshlimm n) (a :: nil)) => Some (n, a)
+  | Some(Op (Olea (Ascaled sc ofs)) (a :: nil)) =>
+      match scale_shift sc ofs with Some n => Some (n, a) | None => None end
+  | _ => None
+  end.
+
+Definition shll_of (x: valnum) : option (int * valnum) :=
+  match get x with
+  | Some(Op (Oshllimm n) (a :: nil)) => Some (n, a)
+  | Some(Op (Oleal (Ascaled sc ofs)) (a :: nil)) =>
+      match scale_shift sc ofs with Some n => Some (n, a) | None => None end
+  | _ => None
+  end.
+
+Definition combine_ror (x y: valnum) : option (operation * list valnum) :=
+  match shl_of x, get y with
+  | Some (n1, a), Some(Op (Oshruimm n2) (b :: nil)) =>
+      if eq_valnum a b && Int.eq (Int.add n1 n2) Int.iwordsize
+      then Some (Ororimm n2, a :: nil) else None
+  | _, _ => None
+  end.
+
+Definition combine_rorl (x y: valnum) : option (operation * list valnum) :=
+  match shll_of x, get y with
+  | Some (n1, a), Some(Op (Oshrluimm n2) (b :: nil)) =>
+      if eq_valnum a b && Int.eq (Int.add n1 n2) Int64.iwordsize'
+      then Some (Ororlimm n2, a :: nil) else None
+  | _, _ => None
+  end.
+
+Definition combine_or (x y: valnum) : option (operation * list valnum) :=
+  match combine_ror x y with
+  | Some r => Some r
+  | None => combine_ror y x
+  end.
+
+Definition combine_orl (x y: valnum) : option (operation * list valnum) :=
+  match combine_rorl x y with
+  | Some r => Some r
+  | None => combine_rorl y x
+  end.
+
 Function combine_op (op: operation) (args: list valnum) : option(operation * list valnum) :=
   match op, args with
   | Olea addr, _ =>
@@ -130,6 +188,8 @@ Function combine_op (op: operation) (args: list valnum) : option(operation * lis
       | Some(Op (Oxorimm m) ys) => Some(Oxorimm (Int.xor m n), ys)
       | _ => None
       end
+  | Oor, x :: y :: nil => combine_or x y
+  | Oorl, x :: y :: nil => combine_orl x y
   | Oandlimm n, x :: nil =>
       match get x with
       | Some(Op (Oandlimm m) ys) => Some(Oandlimm (Int64.and m n), ys)

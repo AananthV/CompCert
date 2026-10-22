@@ -171,6 +171,118 @@ Proof.
   apply combine_addr_32_sound; auto.
 Qed.
 
+Lemma scale_shift_sound:
+  forall sc ofs n,
+  scale_shift sc ofs = Some n ->
+  Int.ltu n Int.iwordsize = true /\ Int.ltu n Int64.iwordsize' = true /\
+  ofs = 0 /\ Int.repr sc = Int.shl Int.one n /\ Int64.repr sc = Int64.shl' Int64.one n.
+Proof.
+  unfold scale_shift; intros.
+  destruct (zeq ofs 0); try discriminate.
+  destruct (zeq sc 2). subst; inv H; intuition reflexivity.
+  destruct (zeq sc 4). subst; inv H; intuition reflexivity.
+  destruct (zeq sc 8). subst; inv H; intuition reflexivity.
+  discriminate.
+Qed.
+
+Lemma shl_of_sound:
+  forall x n a, shl_of get x = Some (n, a) -> valu x = Val.shl (valu a) (Vint n).
+Proof.
+  unfold shl_of; intros.
+  destruct (get x) as [rh|] eqn:G; try discriminate.
+  destruct rh as [op vl| | ]; try discriminate.
+  destruct op; try discriminate.
+- destruct vl as [|a' [|]]; inv H.
+  generalize (get_op_sound _ _ _ G); simpl; intros EQ. congruence.
+- destruct a0; try discriminate. destruct vl as [|a' [|]]; try discriminate.
+  destruct (scale_shift z z0) as [n'|] eqn:SC; inv H.
+  exploit scale_shift_sound; eauto. intros (A & B & C & D & E). subst z0.
+  generalize (get_op_sound _ _ _ G); simpl; intros EQ. inv EQ. rewrite D.
+  destruct (valu a); simpl; auto. rewrite A. rewrite Int.add_zero.
+  rewrite <- Int.shl_mul. auto.
+Qed.
+
+Lemma shll_of_sound:
+  forall x n a, shll_of get x = Some (n, a) -> valu x = Val.shll (valu a) (Vint n).
+Proof.
+  unfold shll_of; intros.
+  destruct (get x) as [rh|] eqn:G; try discriminate.
+  destruct rh as [op vl| | ]; try discriminate.
+  destruct op; try discriminate.
+- destruct vl as [|a' [|]]; inv H.
+  generalize (get_op_sound _ _ _ G); simpl; intros EQ. congruence.
+- destruct a0; try discriminate. destruct vl as [|a' [|]]; try discriminate.
+  destruct (scale_shift z z0) as [n'|] eqn:SC; inv H.
+  exploit scale_shift_sound; eauto. intros (A & B & C & D & E). subst z0.
+  generalize (get_op_sound _ _ _ G); simpl; intros EQ. inv EQ. rewrite E.
+  destruct (valu a); simpl; auto. rewrite B. rewrite Int64.add_zero.
+  rewrite <- Int64.shl'_mul. auto.
+Qed.
+
+Lemma combine_ror_sound:
+  forall x y op' args',
+  combine_ror get x y = Some (op', args') ->
+  exists r', eval_operation ge sp op' (map valu args') m = Some r'
+          /\ Val.lessdef (Val.or (valu x) (valu y)) r'.
+Proof.
+  unfold combine_ror; intros.
+  destruct (shl_of get x) as [[n1 a]|] eqn:SH; try discriminate.
+  destruct (get y) as [rh|] eqn:G; try discriminate.
+  destruct rh as [op vl| | ]; try discriminate.
+  destruct op; try discriminate. destruct vl as [|b [|]]; try discriminate.
+  destruct (eq_valnum a b); try discriminate. subst b.
+  destruct (Int.eq (Int.add n1 n) Int.iwordsize) eqn:E; simpl in H; inv H.
+  generalize (Int.eq_spec (Int.add n1 n) Int.iwordsize); rewrite E; intros H0. generalize (get_op_sound _ _ _ G); simpl; intros EQ. inv EQ. rewrite (shl_of_sound _ _ _ SH).
+  econstructor; split. simpl. eauto.
+  destruct (valu a); simpl; auto.
+  destruct (Int.ltu n1 Int.iwordsize) eqn:?; auto.
+  destruct (Int.ltu n Int.iwordsize) eqn:?; auto.
+  simpl. rewrite <- Int.or_ror; auto.
+Qed.
+
+Lemma combine_rorl_sound:
+  forall x y op' args',
+  combine_rorl get x y = Some (op', args') ->
+  exists r', eval_operation ge sp op' (map valu args') m = Some r'
+          /\ Val.lessdef (Val.orl (valu x) (valu y)) r'.
+Proof.
+  unfold combine_rorl; intros.
+  destruct (shll_of get x) as [[n1 a]|] eqn:SH; try discriminate.
+  destruct (get y) as [rh|] eqn:G; try discriminate.
+  destruct rh as [op vl| | ]; try discriminate.
+  destruct op; try discriminate. destruct vl as [|b [|]]; try discriminate.
+  destruct (eq_valnum a b); try discriminate. subst b.
+  destruct (Int.eq (Int.add n1 n) Int64.iwordsize') eqn:E; simpl in H; inv H.
+  generalize (Int.eq_spec (Int.add n1 n) Int64.iwordsize'); rewrite E; intros H0. generalize (get_op_sound _ _ _ G); simpl; intros EQ. inv EQ. rewrite (shll_of_sound _ _ _ SH).
+  econstructor; split. simpl. eauto.
+  destruct (valu a); simpl; auto.
+  destruct (Int.ltu n1 Int64.iwordsize') eqn:?; auto.
+  destruct (Int.ltu n Int64.iwordsize') eqn:?; auto.
+  simpl. rewrite <- Int64.or_ror'; auto.
+Qed.
+
+Lemma combine_or_sound:
+  forall x y op' args',
+  combine_or get x y = Some (op', args') ->
+  exists r', eval_operation ge sp op' (map valu args') m = Some r'
+          /\ Val.lessdef (Val.or (valu x) (valu y)) r'.
+Proof.
+  unfold combine_or; intros. destruct (combine_ror get x y) as [r|] eqn:C.
+- inv H. eapply combine_ror_sound; eauto.
+- rewrite Val.or_commut. eapply combine_ror_sound; eauto.
+Qed.
+
+Lemma combine_orl_sound:
+  forall x y op' args',
+  combine_orl get x y = Some (op', args') ->
+  exists r', eval_operation ge sp op' (map valu args') m = Some r'
+          /\ Val.lessdef (Val.orl (valu x) (valu y)) r'.
+Proof.
+  unfold combine_orl; intros. destruct (combine_rorl get x y) as [r|] eqn:C.
+- inv H. eapply combine_rorl_sound; eauto.
+- rewrite Val.orl_commut. eapply combine_rorl_sound; eauto.
+Qed.
+
 Theorem combine_op_sound:
   forall op args op' args' r,
   combine_op get op args = Some(op', args') ->
@@ -188,6 +300,10 @@ Proof.
  - UseGetSound. exists r; split; auto. rewrite <- H0. simpl. rewrite <- H1. rewrite Val.or_assoc. auto.
 (* xorimm - xorimm *)
  - UseGetSound. exists r; split; auto. rewrite <- H0. simpl. rewrite <- H1. rewrite Val.xor_assoc. auto.
+(* or - rotate *)
+ - simpl in H0. inv H0. eapply combine_or_sound; eauto.
+(* orl - rotate *)
+ - simpl in H0. inv H0. eapply combine_orl_sound; eauto.
 (* andimm - andimm *)
  - UseGetSound. exists r; split; auto. rewrite <- H0. simpl. rewrite <- H1. rewrite Val.andl_assoc. auto.
 (* orimm - orimm *)
