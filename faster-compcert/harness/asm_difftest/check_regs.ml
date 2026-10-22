@@ -10,8 +10,9 @@
      match     the model is defined and equals the hardware bit for bit,
      MISMATCH  the model is defined and differs from the hardware,
      undef     the model gives [Vundef] (no constraint on the hardware).
-   For the shifts by %cl, the same is done for the masked semantics
-   proposed in #11 ([proposed_rcl] below; Asm.v is not changed).
+   Since #11, Asm.v masks the count of the shifts by %cl as the hardware
+   does, so for them the model must be defined on every test: an undef
+   result is a failure.
 
    Independently of the model, the test fails if a register other than
    the destination changed, and, for the conversions (whose semantics
@@ -36,22 +37,6 @@ let uint64_of_z (z: z) : int64 =
 let lo32 x = Stdlib.Int64.logand x 0xffffffffL
 let hi32 x = Stdlib.Int64.shift_right_logical x 32
 let z = z_of_uint64
-
-(* The proposed semantics of #11, written with the extracted [Val]
-   operations exactly as in the proposal:
-     Psall_rcl rd => rs#rd <- Val.shl rs#rd (Val.and rs#RCX (Vint (Int.repr 31)))
-   etc., with 63 for the 64-bit forms. *)
-let proposed_rcl name (vrd: val0) (vrcx: val0) : val0 =
-  let m31 = Val.coq_and vrcx (vint (z 31L))
-  and m63 = Val.coq_and vrcx (vint (z 63L)) in
-  match name with
-  | "sall_rcl" -> Val.shl vrd m31
-  | "shrl_rcl" -> Val.shru vrd m31
-  | "sarl_rcl" -> Val.shr vrd m31
-  | "salq_rcl" -> Val.shll vrd m63
-  | "shrq_rcl" -> Val.shrlu vrd m63
-  | "sarq_rcl" -> Val.shrl vrd m63
-  | s -> failwith s
 
 (* The instruction of Asm.v, with its source operand in [src]. *)
 let instr name imm src =
@@ -126,14 +111,13 @@ let classify kind r (v: val0 option) =
 type stats = {
   mutable tests: int;
   mutable ok: int; mutable bad: int; mutable undef: int;        (* Asm.v *)
-  mutable pok: int; mutable pbad: int; mutable pundef: int;     (* #11 proposal *)
   mutable regs: int;           (* other registers or flags changed *)
   mutable other_in: int;       (* wrong-kind inputs giving Vundef / tested *)
   mutable other_undef: int;
   mutable info: int;           (* see [info] below *)
   mutable info_of: int;
 }
-let new_stats () = { tests = 0; ok = 0; bad = 0; undef = 0; pok = 0; pbad = 0; pundef = 0;
+let new_stats () = { tests = 0; ok = 0; bad = 0; undef = 0;
                      regs = 0; other_in = 0; other_undef = 0; info = 0; info_of = 0 }
 
 (* Inputs of a kind the compiler never produces for this instruction:
@@ -176,14 +160,9 @@ let () =
         let where = Printf.sprintf "[%s] a=%Lx b=%Lx hw=%Lx" text a b r in
         (match classify kind r (run_model name imm same vd vs) with
          | Match -> s.ok <- s.ok + 1
-         | Undef -> s.undef <- s.undef + 1
+         | Undef -> s.undef <- s.undef + 1;
+             if g = Shift then report "UNDEF %s %s\n" name where
          | Mismatch m -> s.bad <- s.bad + 1; report "MISMATCH %s %s model=%s\n" name where m);
-        if g = Shift then
-          (match classify kind r (Some (proposed_rcl name vd vs)) with
-           | Match -> s.pok <- s.pok + 1
-           | Undef -> s.pundef <- s.pundef + 1
-           | Mismatch m -> s.pbad <- s.pbad + 1;
-               report "MISMATCH(#11 proposal) %s %s model=%s\n" name where m);
         if others_kept = 0 || (g = Cvt && flags_kept = 0) then begin
           s.regs <- s.regs + 1;
           report "REGS %s %s: other registers kept=%d, flags kept=%d\n"
@@ -212,20 +191,18 @@ let () =
          | _ -> ()))
     done
   with End_of_file -> ());
-  Printf.printf "%-9s %7s | %-27s | %-27s | %5s | %-15s | %s\n" "instr" "tests"
-    "Asm.v: match MISMATCH undef" "#11 prop.: match MISM undef" "regs" "wrong-kind:undef" "info";
+  Printf.printf "%-9s %7s | %-27s | %5s | %-15s | %s\n" "instr" "tests"
+    "Asm.v: match MISMATCH undef" "regs" "wrong-kind:undef" "info";
   List.iter (fun k ->
       match Hashtbl.find_opt tbl k with
       | None -> ()
       | Some s ->
-          let prop = if group_of k = Shift
-            then Printf.sprintf "%9d %6d %6d" s.pok s.pbad s.pundef else "" in
           let info = match group_of k with
             | Zx -> Printf.sprintf "upper 32 zeroed %d/%d" s.info s.info_of
             | Shift when not (is_q k) -> Printf.sprintf "upper 32 zeroed %d/%d" s.info s.info_of
             | Cvt -> Printf.sprintf "upper lanes zero after xor %d/%d" s.info s.info_of
             | _ -> "" in
-          Printf.printf "%-9s %7d | %8d %8d %8d  | %-27s | %5d | %7d/%-7d | %s\n" k s.tests
-            s.ok s.bad s.undef prop s.regs s.other_undef s.other_in info)
+          Printf.printf "%-9s %7d | %8d %8d %8d  | %5d | %7d/%-7d | %s\n" k s.tests
+            s.ok s.bad s.undef s.regs s.other_undef s.other_in info)
     names;
   exit (if !failures = 0 then 0 else 1)

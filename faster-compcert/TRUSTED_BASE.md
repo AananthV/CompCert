@@ -99,3 +99,34 @@ sequence with 3 seeds:
 
 **Revert.** Remove the xor-emitting lines in `TargetPrinter.ml` and
 `Asmexpand.ml`.
+
+## 4. x86 shift-count masking (#11)
+
+- **Approved:** by the owner, 2026-10-22, for exactly the proposal on #11.
+- **Merged in:** "x86: model shift-count masking; optional masked-shift selection".
+- **Flag:** the semantic refinement is unconditional. The optimization that
+  uses it is behind `-fshift-mask`, off by default.
+
+**Assumption.** In `x86/Asm.v`, the variable-count shifts mask their count:
+```coq
+  | Psall_rcl rd => Next (nextinstr_nf (rs#rd <- (Val.shl  rs#rd (Val.and rs#RCX (Vint (Int.repr 31)))))) m
+  (* likewise Pshrl_rcl (Val.shru) and Psarl_rcl (Val.shr) with 31;
+     Psalq_rcl (Val.shll), Pshrq_rcl (Val.shrlu) and Psarq_rcl (Val.shrl) with 63 *)
+```
+Before this change these shifts were `Val.shl rs#rd rs#RCX` etc., which is
+undefined for counts of 32 (or 64) and above.
+
+**Justification.** Intel SDM Vol. 2, SAL/SAR/SHL/SHR: the count is masked to
+5 bits (6 with REX.W). This is a refinement: for counts that were defined
+before, the new semantics agrees with the old.
+
+**Validation.** `harness/asm_difftest/` group `shift`, against the extracted new
+semantics:
+- all counts 0..255, with garbage in bits 8..63 of `%rcx`;
+- about 20,000 tests per instruction, 3 seeds;
+- 0 mismatches, and defined in 100% of the tests. Under the old semantics, only
+  6-13% were defined.
+
+**Revert.** Restore the six cases. Then remove the masked operators
+(`Oshlmask`, …), their selection rules and the `-fshift-mask` flag.
+

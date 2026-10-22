@@ -35,6 +35,8 @@ Changes, each fully proved:
 
 | new pass `Loadop`: x86 arithmetic with memory operands (#5; **trusted-base change**, see [TRUSTED_BASE.md](TRUSTED_BASE.md)) | `-fload-op` (off by default) | gemm 0.91x, nbody 0.96x, spectral 0.97x |
 
+| x86 shift-count masking in the Asm model, plus masked-shift selection (#11; **trusted-base change**) | `-fshift-mask` (off by default) | nsievebits 0.94x |
+
 Verification:
 
 - No new axioms. The only new entries in `Print Assumptions` are three flags
