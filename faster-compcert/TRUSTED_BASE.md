@@ -48,28 +48,54 @@ payloads, denormals, and integer edge values. There were 0 mismatches.
 Also remove `backend/Loadop*.v`, `*/LoadopOp.v`, `Mloadop`/`Lloadop`, and the
 `-fload-op` flag.
 
-## Pending retroactive review (#10)
+## 2. x86 zero-extending 32-bit shift/mask instructions (round 1, retroactive review #10)
 
-These changes were merged in round 1, before this protocol existed. They
-await owner approval:
+- **Approved:** by the owner, 2026-10-22, in a retroactive review (#10).
+- **Merged in:** round 1 (bd83427d).
+- **Flag:** none, always on. They are produced by instruction selection for
+  `(long)(x >> n)`, `(long)(x & n)` and small `(u64)e << n`.
 
-1. `x86/Asm.v`: `Pshrlzx_ri`, `Pandlzx_ri` and `Psallzx_ri`, with semantics
-   `rs#rd <- Val.longofintu (Val.shru/and/shl rs#rd (Vint n))` and flags
-   undefined. They are printed as plain `shrl`/`andl`/`sall` on the 32-bit
-   register.
-2. `x86/TargetPrinter.ml` and `x86/Asmexpand.ml`: `xorps`/`xorpd dst,dst`
-   before `cvtsi2sd/ss(q)` (always), before `cvtss2sd`/`cvtsd2ss` (when
-   dst ≠ src), and before the `sqrtsd` expansion (when dst ≠ src).
+**Assumption.** `x86/Asm.v` gains `Pshrlzx_ri rd n`, `Pandlzx_ri rd n` and
+`Psallzx_ri rd n`, with semantics
+`rs#rd <- Val.longofintu (Val.shru/and/shl rs#rd (Vint n))` and flags undefined
+(`nextinstr_nf`). `x86/TargetPrinter.ml` prints them as `shrl $n, %r32`,
+`andl $n, %r32` and `sall $n, %r32`.
 
-**Evidence** (`harness/asm_difftest/`, groups `zx` and `cvt`, extracted
-semantics, about 20,000 tests per instruction, two seeds):
-- There are 0 mismatches wherever the model is defined. The full 64-bit
-  result was compared: the hardware zeroed the upper 32 bits in every test,
-  even for an effective shift count of 0.
-- For the conversion and `sqrtsd` sequences:
-  - the low lane matches the modelled single instruction;
-  - no other register and no flag changes;
-  - the upper lanes are zeroed by the xor.
-- Inputs the compiler never produces (a `Vlong` operand for a 32-bit operation,
-  `Vundef`, …) give `Vundef` in the model, which places no constraint on the
-  hardware.
+**Justification.** Intel SDM Vol. 1 §3.4.1.1: 32-bit operands generate a 32-bit
+result, zero-extended to 64 bits in the destination register. Inputs the
+compiler never produces are `Vundef`, so they place no constraint on the
+hardware.
+
+**Validation.** `harness/asm_difftest/` group `zx`, about 20,000 tests per
+instruction with 3 seeds: 0 mismatches wherever the model is defined, on all 64
+bits of the result.
+
+**Revert.** Remove the three constructors and their printer cases, and the
+`Ozext*` operators and selection rules that produce them (`x86/Op.v`,
+`SelectLong.vp`).
+
+## 3. Printer/expander xor-zeroing before partial-register writes (round 1, retroactive review #10)
+
+- **Approved:** by the owner, 2026-10-22, in a retroactive review (#10).
+- **Merged in:** round 1 (bd83427d).
+- **Flag:** none, always on.
+
+**Change.** `x86/TargetPrinter.ml` emits `xorps`/`xorpd dst,dst` before
+`cvtsi2sd/ss(q)` (always), and before `cvtss2sd`/`cvtsd2ss` when dst ≠ src.
+`x86/Asmexpand.ml` emits `Pxorpd_f res` before `sqrtsd` when res ≠ src. This
+removes false dependencies on the old value of the destination.
+
+**Justification.** Xor-zeroing writes only the destination register. It does
+not modify EFLAGS or any modelled state, and the upper lanes of xmm registers
+are not modelled. `cvtsi2*` reads a general-purpose register, so its
+destination can never alias its source.
+
+**Validation.** `harness/asm_difftest/` group `cvt`, about 20,000 tests per
+sequence with 3 seeds:
+- the low lane equals the modelled single instruction;
+- no other register and no flag changes;
+- the upper lanes are zeroed;
+- 0 failures.
+
+**Revert.** Remove the xor-emitting lines in `TargetPrinter.ml` and
+`Asmexpand.ml`.
