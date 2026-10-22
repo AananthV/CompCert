@@ -174,3 +174,43 @@ let should_inline (io: inlining_info) (id: ident) (f: coq_function) =
   !Clflags.option_finline
   && inline_decision io [] id
   && not (io.round > 1 && self_recursive id io)
+
+(* Bounded recursive inlining.  [inline_fuel fenv f] is the number of
+   additional levels at which the self-recursive call of [f] is inlined
+   into the body of [f] itself (see [Inlining.callee_env]): with fuel [n],
+   the recursion is unrolled [n+1] levels deep.  This is done only for
+   inlinable functions (present in [fenv]) with a single recursive call
+   site, typically loops produced by accumulator tail-recursion
+   elimination ([Tailacc]): then the body of [f] is copied [n+1] times.
+   Unrolling functions with several recursive call sites copies their
+   body exponentially many times, and was not found to be profitable.
+   This is controlled by [-finline-recursive]; the depth is bounded by
+   [-finline-recursive-depth], and the total size of the copies by
+   [recursive_growth].  The second inlining round never
+   inlines self-recursive functions, hence never unrolls them further. *)
+
+let recursive_growth = 120
+
+let inline_fuel (fenv: coq_function PTree.t) (f: coq_function) =
+  let maxdepth = !Clflags.option_finline_recursive_depth in
+  if not (!Clflags.option_finline && !Clflags.option_finline_recursive)
+     || maxdepth <= 1
+  then Datatypes.O else begin
+    let is_self id =
+      match PTree.get id fenv with Some g -> g == f | None -> false in
+    let (size, selfcalls) =
+      PTree.fold (fun (size, n) _ i ->
+          let n =
+            match i with
+            | Icall (_, Coq_inr id, _, _, _)
+            | Itailcall (_, Coq_inr id, _) when is_self id -> n + 1
+            | _ -> n in
+          (size + instr_size i, n))
+        f.fn_code (0, 0) in
+    if selfcalls <> 1 then Datatypes.O else begin
+      let rec depth d =
+        if d < maxdepth && size * (d + 1) <= recursive_growth
+        then depth (d + 1) else d in
+      Camlcoq.Nat.of_int (depth 1 - 1)
+    end
+  end

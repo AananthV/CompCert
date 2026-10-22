@@ -190,6 +190,8 @@ Processing options:
   -Obranchless   Optimize to generate fewer conditional branches; try to produce
                  branch-free instruction sequences as much as possible
   -ftailcalls    Optimize function calls in tail position [on]
+  -ftail-acc     Turn self-recursive calls combined with an accumulator into
+                 loops [on]
   -fconst-prop   Perform global constant propagation  [on]
   -ffloat-const-prop <n>  Control constant propagation of floats
                    (<n>=0: none, <n>=1: limited, <n>=2: full; default is full)
@@ -205,6 +207,9 @@ Processing options:
   -finline-functions-called-once Integrate functions only required by their
                  single caller [on]
   -finline-small-functions Integrate functions whose body is small [on]
+  -finline-recursive Inline self-recursive functions with a single recursive
+                 call several levels deep into their own body [on]
+  -finline-recursive-depth <n>  Maximal number of levels for -finline-recursive [3]
   -fif-conversion Perform if-conversion (generation of conditional moves) [on]
 Code generation options: (use -fno-<opt> to turn off -f<opt>)
   -fpic / -fPIC  Generate position-independent code [off]
@@ -257,11 +262,12 @@ let dump_mnemonics destfile =
   exit 0
 
 let optimization_options = [
-  option_ftailcalls; option_fifconversion; option_fconstprop; option_fcse;
+  option_ftailcalls; option_ftailacc; option_fifconversion;
+  option_fconstprop; option_fcse;
   option_floadfwd; option_fredundancy; option_flooprotate; option_flicm;
   option_fivwiden;
   option_finline; option_finline_functions_called_once;
-  option_finline_small_functions;
+  option_finline_small_functions; option_finline_recursive;
 ]
 
 let set_all opts () = List.iter (fun r -> r := true) opts
@@ -321,6 +327,7 @@ let cmdline_actions =
   Exact "-fsmall-data", Integer(fun n -> option_small_data := n);
   Exact "-fsmall-const", Integer(fun n -> option_small_const := n);
   Exact "-ffloat-const-prop", Integer(fun n -> option_ffloatconstprop := n); 
+  Exact "-finline-recursive-depth", Integer(fun n -> option_finline_recursive_depth := n);
   Exact "-falign-functions", Integer(fun n -> check_align n; option_falignfunctions := Some n);
   Exact "-falign-branch-targets", Integer(fun n -> check_align n; option_falignbranchtargets := n);
   Exact "-falign-cond-branches", Integer(fun n -> check_align n; option_faligncondbranchs := n);
@@ -392,6 +399,7 @@ let cmdline_actions =
 (* Optimization options *)
 (* -f options: come in -f and -fno- variants *)
   @ f_opt "tailcalls" option_ftailcalls
+  @ f_opt "tail-acc" option_ftailacc
   @ f_opt "if-conversion" option_fifconversion
   @ f_opt "const-prop" option_fconstprop
   @ f_opt "cse" option_fcse
@@ -405,6 +413,7 @@ let cmdline_actions =
   @ f_opt "inline" option_finline
   @ f_opt "inline-functions-called-once" option_finline_functions_called_once
   @ f_opt "inline-small-functions" option_finline_small_functions
+  @ f_opt "inline-recursive" option_finline_recursive
 (* Code generation options *)
   @ f_opt "fpu" option_ffpu
   @ f_opt "sse" option_ffpu (* backward compatibility *)

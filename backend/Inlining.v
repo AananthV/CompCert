@@ -38,6 +38,13 @@ Parameter inlining_analysis: nat -> program -> inlining_info.
 
 Parameter should_inline: inlining_info -> ident -> function -> bool.
 
+(** A self-recursive function can be inlined into its own body several
+  levels deep.  The number of levels is bounded by a fuel, chosen by the
+  external heuristic [inline_fuel] for each function, given the environment
+  of inlinable functions. *)
+
+Parameter inline_fuel: funenv -> function -> nat.
+
 Definition add_globdef (io: inlining_info) (fenv: funenv) (idg: ident * globdef fundef unit) : funenv :=
   match idg with
   | (id, Gfun (Internal f)) =>
@@ -269,29 +276,53 @@ Fixpoint add_moves (srcs dsts: list reg) (succ: node): mon node :=
       ret succ
   end.
 
-(** To prevent infinite inlining of a recursive function, when we
-  inline the body of a function [f], this function is removed from the
-  environment of inlinable functions and therefore becomes ineligible
-  for inlining.  This decreases the size (number of entries) of the
-  environment and guarantees termination.  Inlining is, therefore,
-  presented as a well-founded recursion over the size of the environment. *)
+(** To prevent infinite inlining of a recursive function, the expansion
+  carries a fuel along with the environment of inlinable functions.
+  When we inline the body of a function [f], either the fuel is positive
+  and is decremented, or the fuel is zero and [f] is removed from the
+  environment of inlinable functions, and therefore becomes ineligible
+  for inlining.  Either way, the sum of the fuel and of the size (number
+  of entries) of the environment decreases, which guarantees termination.
+  Inlining is, therefore, presented as a well-founded recursion over this
+  sum.  With a fuel of [n], a recursive function can be inlined [n+1]
+  levels deep into itself. *)
+
+Definition fuelenv : Type := (funenv * nat)%type.
+
+Definition size_fuelenv (fe: fuelenv) : nat := (size_fenv (fst fe) + snd fe)%nat.
 
 Section EXPAND_CFG.
 
-Variable fenv: funenv.
+Variable fe: fuelenv.
 
-(** The [rec] parameter is the recursor: [rec fenv' P ctx f] copies
+(** The [rec] parameter is the recursor: [rec fe' P ctx f] copies
   the body of function [f], with inline expansion within, as governed
-  by context [ctx].  It can only be called for function environments
-  [fenv'] strictly smaller than the current environment [fenv]. *)
+  by context [ctx].  It can only be called for fuels and function
+  environments [fe'] strictly smaller than the current ones [fe]. *)
 
-Variable rec: forall fenv', (size_fenv fenv' < size_fenv fenv)%nat -> context -> function -> mon unit.
+Variable rec: forall fe', (size_fuelenv fe' < size_fuelenv fe)%nat -> context -> function -> mon unit.
+
+(** The environment used to expand the body of an inlined function [id]. *)
+
+Definition callee_env (id: ident) : fuelenv :=
+  match snd fe with
+  | O => (PTree.remove id (fst fe), O)
+  | S n => (fst fe, n)
+  end.
+
+Lemma callee_env_smaller:
+  forall id f, (fst fe)!id = Some f -> (size_fuelenv (callee_env id) < size_fuelenv fe)%nat.
+Proof.
+  intros. unfold callee_env, size_fuelenv. destruct (snd fe) as [|n] eqn:E; simpl.
+- generalize (PTree_Properties.cardinal_remove H). unfold size_fenv. lia.
+- lia.
+Qed.
 
 (** Given a register-or-symbol [ros], can we inline the corresponding call? *)
 
 Inductive inline_decision (ros: reg + ident) : Type :=
   | Cannot_inline
-  | Can_inline (id: ident) (f: function) (P: ros = inr reg id) (Q: fenv!id = Some f).
+  | Can_inline (id: ident) (f: function) (P: ros = inr reg id) (Q: (fst fe)!id = Some f).
 
 Arguments Cannot_inline {ros}.
 Arguments Can_inline {ros}.
@@ -299,7 +330,7 @@ Arguments Can_inline {ros}.
 Program Definition can_inline (ros: reg + ident): inline_decision ros :=
   match ros with
   | inl r => Cannot_inline
-  | inr id => match fenv!id with Some f => Can_inline id f _ _ | None => Cannot_inline end
+  | inr id => match (fst fe)!id with Some f => Can_inline id f _ _ | None => Cannot_inline end
   end.
 
 (** Inlining of a call to function [f].  An appropriate context is
@@ -307,7 +338,7 @@ Program Definition can_inline (ros: reg + ident): inline_decision ros :=
   are inserted to copy the arguments of the call to the parameters of [f]. *)
 
 Definition inline_function (ctx: context) (id: ident) (f: function)
-                           (P: PTree.get id fenv = Some f)
+                           (P: PTree.get id (fst fe) = Some f)
                            (args: list reg)
                            (retpc: node) (retreg: reg) : mon node :=
   let npc := max_pc_function f in
@@ -315,21 +346,21 @@ Definition inline_function (ctx: context) (id: ident) (f: function)
   do dpc <- reserve_nodes npc;
   do dreg <- reserve_regs nreg;
   let ctx' := callcontext ctx dpc dreg nreg f.(fn_stacksize) retpc retreg in
-  do x <- rec (PTree.remove id fenv) (PTree_Properties.cardinal_remove P) ctx' f;
+  do x <- rec (callee_env id) (callee_env_smaller id f P) ctx' f;
   add_moves (sregs ctx args) (sregs ctx' f.(fn_params)) (spc ctx' f.(fn_entrypoint)).
 
 (** Inlining of a tail call to function [f].  Similar to [inline_function],
   but the new context is different. *)
 
 Definition inline_tail_function (ctx: context) (id: ident) (f: function)
-                               (P: PTree.get id fenv = Some f)
+                               (P: PTree.get id (fst fe) = Some f)
                                (args: list reg): mon node :=
   let npc := max_pc_function f in
   let nreg := max_reg_function f in
   do dpc <- reserve_nodes npc;
   do dreg <- reserve_regs nreg;
   let ctx' := tailcontext ctx dpc dreg nreg f.(fn_stacksize) in
-  do x <- rec (PTree.remove id fenv) (PTree_Properties.cardinal_remove P) ctx' f;
+  do x <- rec (callee_env id) (callee_env_smaller id f P) ctx' f;
   add_moves (sregs ctx args) (sregs ctx' f.(fn_params)) (spc ctx' f.(fn_entrypoint)).
 
 (** The instruction generated for a [Ireturn] instruction found in an
@@ -427,18 +458,18 @@ End EXPAND_CFG.
 (** Here we "tie the knot" of the recursion, taking the fixpoint
   of [expand_cfg_rec]. *)
 
-Definition expand_cfg := Fixm size_fenv expand_cfg_rec.
+Definition expand_cfg := Fixm size_fuelenv expand_cfg_rec.
 
 (** Start of the recursion: copy and inline function [f] in the
   initial context. *)
 
-Definition expand_function (fenv: funenv) (f: function): mon context :=
+Definition expand_function (fenv: funenv) (fuel: nat) (f: function): mon context :=
   let npc := max_pc_function f in
   let nreg := max_reg_function f in
   do dpc <- reserve_nodes npc;
   do dreg <- reserve_regs nreg;
   let ctx := initcontext dpc dreg nreg f.(fn_stacksize) in
-  do x <- expand_cfg fenv ctx f;
+  do x <- expand_cfg (fenv, fuel) ctx f;
   ret ctx.
 
 (** ** Inlining in functions and whole programs. *)
@@ -451,7 +482,7 @@ Local Open Scope string_scope.
   results. *)
 
 Definition transf_function (fenv: funenv) (f: function) : Errors.res function :=
-  let '(R ctx s _) := expand_function fenv f initstate in
+  let '(R ctx s _) := expand_function fenv (inline_fuel fenv f) f initstate in
   if zlt s.(st_stksize) Ptrofs.max_unsigned then
     OK (mkfunction f.(fn_sig)
                    (sregs ctx f.(fn_params))

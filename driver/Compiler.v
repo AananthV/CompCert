@@ -35,6 +35,7 @@ Require Cshmgen.
 Require Cminorgen.
 Require Selection.
 Require RTLgen.
+Require Tailacc.
 Require Tailcall.
 Require Inlining.
 Require Renumber.
@@ -61,6 +62,7 @@ Require Cshmgenproof.
 Require Cminorgenproof.
 Require Selectionproof.
 Require RTLgenproof.
+Require Tailaccproof.
 Require Tailcallproof.
 Require Inliningproof.
 Require Renumberproof.
@@ -130,6 +132,7 @@ Definition partial_if {A: Type}
 Definition transf_rtl_program (f: RTL.program) : res Asm.program :=
    OK f
    @@ print (print_RTL 0)
+   @@ total_if Compopts.optim_tailacc (time "Accumulator tail recursion" Tailacc.transf_program)
    @@ total_if Compopts.optim_tailcalls (time "Tail calls" Tailcall.transf_program)
    @@ print (print_RTL 1)
   @@@ time "Inlining" (Inlining.transf_program 1)
@@ -267,6 +270,7 @@ Definition CompCert's_passes :=
   ::: mkpass Cminorgenproof.match_prog
   ::: mkpass Selectionproof.match_prog
   ::: mkpass RTLgenproof.match_prog
+  ::: mkpass (match_if Compopts.optim_tailacc Tailaccproof.match_prog)
   ::: mkpass (match_if Compopts.optim_tailcalls Tailcallproof.match_prog)
   ::: mkpass (Inliningproof.match_prog 1)
   ::: mkpass Renumberproof.match_prog
@@ -321,7 +325,8 @@ Proof.
   destruct (Selection.sel_program p4) as [p5|e] eqn:P5; simpl in T; try discriminate.
   destruct (RTLgen.transl_program p5) as [p6|e] eqn:P6; simpl in T; try discriminate.
   unfold transf_rtl_program, time in T. rewrite ! compose_print_identity in T. simpl in T.
-  set (p7 := total_if optim_tailcalls Tailcall.transf_program p6) in *.
+  set (p6a := total_if optim_tailacc Tailacc.transf_program p6) in *.
+  set (p7 := total_if optim_tailcalls Tailcall.transf_program p6a) in *.
   destruct (Inlining.transf_program 1 p7) as [p8|e] eqn:P8; simpl in T; try discriminate.
   set (p9 := Renumber.transf_program p8) in *.
   set (p10 := total_if optim_constprop Constprop.transf_program p9) in *.
@@ -354,6 +359,7 @@ Proof.
   exists p4; split. apply Cminorgenproof.transf_program_match; auto.
   exists p5; split. apply Selectionproof.transf_program_match; auto.
   exists p6; split. apply RTLgenproof.transf_program_match; auto.
+  exists p6a; split. apply total_if_match. apply Tailaccproof.transf_program_match.
   exists p7; split. apply total_if_match. apply Tailcallproof.transf_program_match.
   exists p8; split. apply Inliningproof.transf_program_match; auto.
   exists p9; split. apply Renumberproof.transf_program_match; auto.
@@ -430,7 +436,7 @@ Ltac DestructM :=
       destruct H as (p & M & MM)
   end.
   repeat DestructM. subst tp.
-  assert (F: forward_simulation (Cstrategy.semantics p) (Asm.semantics p32)).
+  assert (F: forward_simulation (Cstrategy.semantics p) (Asm.semantics p33)).
   {
   eapply compose_forward_simulations.
     eapply SimplExprproof.transl_program_correct; eassumption.
@@ -444,6 +450,8 @@ Ltac DestructM :=
     eapply Selectionproof.transf_program_correct; eassumption.
   eapply compose_forward_simulations.
     eapply RTLgenproof.transf_program_correct; eassumption.
+  eapply compose_forward_simulations.
+    eapply match_if_simulation. eassumption. exact Tailaccproof.transf_program_correct.
   eapply compose_forward_simulations.
     eapply match_if_simulation. eassumption. exact Tailcallproof.transf_program_correct.
   eapply compose_forward_simulations.

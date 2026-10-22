@@ -30,6 +30,9 @@ Parameter va_strict: unit -> bool.
 (** Flag -ftailcalls.  For tail call optimization. *)
 Parameter optim_tailcalls: unit -> bool.
 
+(** Flag -ftail-acc.  For accumulator tail-recursion elimination. *)
+Parameter optim_tailacc: unit -> bool.
+
 (** Flag -fconstprop.  For constant propagation. *)
 Parameter optim_constprop: unit -> bool.
 
