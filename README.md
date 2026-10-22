@@ -55,8 +55,9 @@ Progress so far:
   these need changes to the trusted model.
 - [x] Fix the Loadfwd compile-time/memory blow-up on large functions (65 GB →
   112 MB on `test/abi/layout.c`; [#19](https://github.com/AananthV/CompCert/issues/19)).
-- [ ] Reduce the remaining compile-time overhead (1.3–2.8× CompCert 3.18;
-  [#9](https://github.com/AananthV/CompCert/issues/9)).
+- [ ] Reduce the remaining compile-time overhead: first round done
+  (layout.c 11.6 → 6.5 s, spass 54.8 → 46.4 s; CompCert 3.18: 4.9 / 31.3 s);
+  spass is still ~1.5× ([#9](https://github.com/AananthV/CompCert/issues/9)).
 
 All changes keep CompCert's end-to-end correctness theorem. They add no
 axioms: the only new assumptions are command-line flags and validated
