@@ -48,7 +48,8 @@ Progress so far:
 - [x] Held-out evaluation on larger programs and PolyBench ([#2](https://github.com/AananthV/CompCert/issues/2)).
 - [x] LICM of chains of dependent operations: loop-nest address arithmetic
   (PolyBench 0.845 → 0.776; [#16](https://github.com/AananthV/CompCert/issues/16)).
-- [ ] Induction-variable widening with range analysis (sha1, sha3).
+- [x] Induction-variable widening and strength reduction (new pass `IVwiden`;
+  PolyBench −4.3%, sha1 −13%; [#4](https://github.com/AananthV/CompCert/issues/4)).
 - [ ] Load-op memory operands on x86 (nbody, aes).
 - [ ] Opt-in libm builtins (`sqrt`, `floor`) and unaligned 64-bit accesses:
   these need changes to the trusted model.

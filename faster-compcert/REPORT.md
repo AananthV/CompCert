@@ -785,3 +785,106 @@ All measured in one session against CompCert 3.18. Raw data is in
 
 `test/c` and gcc moved by up to 0.6% from round 1 although their code did
 not change. That is the machine's run-to-run drift between sessions.
+
+---
+
+## 9. Round 3: induction-variable widening and strength reduction (issue #4)
+
+A new RTL pass, `IVwiden`, runs after LICM (`-fiv-widen`).
+
+**What it does.** Take a 32-bit loop variable `i` that is incremented once
+per iteration. An untrusted oracle:
+- introduces a 64-bit shadow `li = (long)i`, and derived values
+  `p = b + li*m` with `b` loop-invariant;
+- maintains them on loop entry and after the increment;
+- rewrites:
+  - computations of `b + (long)i*m + d` into moves or `p + d`;
+  - signed exit tests on `i` into 64-bit tests on `li`;
+  - addressing modes, folding constant offsets.
+
+**How it is checked.** A verified validator checks that:
+- the oracle's facts form an inductive invariant of the transformed code. The
+  facts are `x = b + (long)i*m + d`, register equalities, and bounds on 32-bit
+  values;
+- inserted nodes only compute safe operations into fresh registers;
+- the facts justify each rewrite.
+
+The crucial rule: an increment `i = i + c` keeps the facts about `i` only if
+the bounds prove that `i + c` cannot overflow. For example, a guard `i < n`
+on the path gives `i ≤ max-1`. If the check fails, the function is left
+unchanged.
+
+**Cost.**
+- About 3,250 new lines; the largest file is `IVwidenproof.v` (1,614).
+- The proof is a plus-simulation, executing inserted chains by fuel.
+- The x86 recognizers are in `x86/IVop.v`; the other targets have stubs that
+  disable the pass.
+- New assumptions: the flag `Compopts.optim_ivwiden` and the validated oracle
+  `IVwiden.iv_oracle`.
+- No trusted-base files touched.
+- Proofs check on all six targets.
+- 154 regression tests pass.
+- Compile time on `test/c`: +5%.
+
+### Results (same session, previous master vs this change; min of ≥3 runs, seconds)
+
+| suite | geomean ratio |
+|---|---:|
+| `test/c` | 0.989 |
+| big | 1.005 |
+| PolyBench | **0.957** |
+
+| program | before #4 | after #4 | change |
+|---|---:|---:|---:|
+| sha1 | 0.0513 | 0.0447 | -12.8% |
+| sha3 | 0.0290 | 0.0260 | -10.5% |
+| gemm | 1.4121 | 1.0469 | -25.9% |
+| ludcmp | 0.1016 | 0.0882 | -13.2% |
+| syrk | 0.9822 | 0.8587 | -12.6% |
+| heat-3d | 0.0490 | 0.0434 | -11.6% |
+| doitgen | 0.8451 | 0.7498 | -11.3% |
+| fdtd-2d | 2.4661 | 2.1962 | -10.9% |
+| cholesky | 0.1033 | 0.0922 | -10.7% |
+| jacobi-2d | 2.9777 | 2.6978 | -9.4% |
+| symm | 1.8226 | 1.8810 | +3.2% |
+| floyd-warshall | 0.1686 | 0.1764 | +4.6% |
+| raytracer | 0.8000 | 0.8219 | +2.7% |
+
+gemm's inner loop is now 11 instructions; it was 13, and gcc -O1 has 8.
+```asm
+.L114:  movsd   0(%rdi,%rcx,8), %xmm6   # C[i][j], 64-bit index, no movslq
+        movsd   0(%rdx,%r11,8), %xmm7
+        movapd  %xmm3, %xmm4
+        mulsd   %xmm7, %xmm4
+        movsd   0(%rsi,%rcx,8), %xmm8
+        mulsd   %xmm8, %xmm4
+        addsd   %xmm4, %xmm6
+        movsd   %xmm6, 0(%rdi,%rcx,8)
+        leaq    1(%rcx), %rcx
+        cmpq    $1100, %rcx
+        jl      .L114
+```
+- sha1's message expansion now uses `movl -12(%r9,%rdi,4)`, which is what the
+  assembly surgery of §1.3 predicted.
+- Column walks (2mm, syrk, gramschmidt) step a pointer with
+  `leaq 7200(%rdi),%rdi` instead of `imulq; leaq`.
+
+**Regressions:**
+- **raytracer +2.7%.** Changing a lookup loop inside the interpreter makes the
+  register allocator spill the token pointer on the dispatch path.
+- **floyd-warshall +4.6% and symm +3.2%.** In floyd-warshall the inner loop
+  drops from 12 to 10 instructions; it is branchy and layout-sensitive.
+
+These and gramschmidt (§8) are tracked together in #20.
+
+**Limitations.**
+- Only `i = i + c` with a single increment, and only signed comparisons.
+- Flattened indices (`i*n + j`) and `k - i` are not handled.
+- The exit test stays on `li`; it is not moved onto the pointer.
+- x86 only.
+
+**Found while testing: compile-time blow-up.** `test/abi/layout.c` takes
+3.9 s and 123 MB with CompCert 3.18, but 367 s and **65 GB** with master after
+round 2. Bisecting with `-fno-*` flags points at **Loadfwd**: with
+`-fno-loadfwd` it takes 8.9 s and 132 MB. This is tracked in #19 and fixed
+next.

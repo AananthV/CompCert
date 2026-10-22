@@ -30,6 +30,7 @@ Changes, each fully proved:
 | Deadcode: loads through non-stack pointers no longer make the frame live; CSE: disjoint-offset aliasing | — | sha3 0.82x |
 | x86: fused 32->64 zero-extension, small rotates, `x/2`, `cvtsi2sd`/`sqrtsd` false dependencies | — | aes 0.87x, siphash24 0.92x |
 | new pass `Loadfwd`: load forwarding across join points | `-floadfwd` | spectral 0.60x |
+| new pass `IVwiden`: induction-variable widening and strength reduction, validated (#4) | `-fiv-widen` | gemm 0.74x, sha1 0.87x, syrk 0.87x |
 | new passes `Looprot` + `LICM`: validated loop rotation and loop-invariant code motion, including chains of dependent operations (#16) | `-floop-rotate`, `-flicm` | aes, sha1, fannkuch; gemm 0.72x, syrk 0.73x, floyd-warshall 0.74x |
 
 Verification:
