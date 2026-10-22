@@ -1015,3 +1015,25 @@ paid for its cost, so neither is merged. The code is kept on branch
 - **Found along the way:** 64-bit rotates by 1 are not recognised. sha3
   compiles `ROTL64(x,1)` to `lea/mov/shr/or`, 5 times per round. This is an
   instruction-selection fix, added to #6.
+
+---
+
+## 13. Rotates recognised during CSE (issue #6, Tier 1 part)
+
+**Rotates.** sha3 compiled `ROTL64(x,1)` to `lea/mov/shr/or` 5 times per
+round. Selection only matches `(x << n) | (x >>u (64-n))` when both sides
+are the same variable. Here they are two loads of the same location, which
+only become equal after CSE.
+- x86 `CombineOp` now rewrites `Oorl`/`Oor` of a left shift (including the
+  scaled-`lea` form) and a right shift of the same value number into a
+  rotate, with a proof in `CombineOpproof.v` (176 lines in total).
+- sha3 goes from 24 to 29 rotate instructions and is **−3.4%** faster.
+- No other program's assembly changes.
+
+**Stack-array addressing: dropped.** LICM now hoists the `leaq N(%rsp)`
+array bases out of loops, so they are no longer recomputed per access.
+Assembly surgery rewriting sha1's accesses to `ofs(%rsp,idx,4)` gives no
+gain (44.5 vs 44.7 ms).
+
+**Remaining Tier 2 parts of #6.** Zero-extending byte loads and byte-field
+extraction need new Asm instructions. They are moved to #25.
