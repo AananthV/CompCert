@@ -583,25 +583,92 @@ Proof.
   econstructor; split. EvalOp. auto.
 Qed.
 
+(** Shifts with a masked count ([-fshift-mask]). *)
+
+Remark loword_and:
+  forall a b, Int64.loword (Int64.and a b) = Int.and (Int64.loword a) (Int64.loword b).
+Proof.
+  intros. apply Int.same_bits_eq; intros. unfold Int64.loword.
+  change Int.zwordsize with 32 in H.
+  rewrite Int.bits_and by (change Int.zwordsize with 32; lia).
+  rewrite !Int.testbit_repr by (change Int.zwordsize with 32; lia).
+  change (Z.testbit (Int64.unsigned (Int64.and a b)) i) with (Int64.testbit (Int64.and a b) i).
+  rewrite Int64.bits_and by (change Int64.zwordsize with 64; lia). auto.
+Qed.
+
+Remark loword_repr_unsigned:
+  forall n, Int64.loword (Int64.repr (Int.unsigned n)) = n.
+Proof.
+  intros. unfold Int64.loword. rewrite Int64.unsigned_repr. apply Int.repr_unsigned.
+  generalize (Int.unsigned_range n). unfold Int.modulus, Int64.max_unsigned, Int64.modulus.
+  change (two_power_nat Int.wordsize) with 4294967296.
+  change (two_power_nat Int64.wordsize) with 18446744073709551616. lia.
+Qed.
+
+Ltac InvEvalAll :=
+  repeat match goal with
+  | [ H: eval_expr _ _ _ _ _ (Eop _ _) _ |- _ ] => inv H
+  | [ H: eval_exprlist _ _ _ _ _ Enil _ |- _ ] => inv H
+  | [ H: eval_exprlist _ _ _ _ _ (_ ::: _) _ |- _ ] => inv H
+  | [ H: eval_operation _ _ _ _ _ = Some _ |- _ ] => simpl in H; inv H
+  end.
+
+Lemma eval_masked_count:
+  forall le n b t y,
+  masked_count n b = Some t ->
+  eval_expr ge sp e m le b y ->
+  exists v, eval_expr ge sp e m le t v /\ Val.lessdef y (Val.and v (Vint n)).
+Proof.
+  unfold masked_count; intros until y.
+  destruct (Compopts.optim_shiftmask tt); try discriminate.
+  unfold masked_count_base; case (masked_count_base_match b); intros; try discriminate.
+- destruct (Int.eq m0 n) eqn:E; inv H.
+  apply Int.same_if_eq in E; subst m0. InvEval. eauto.
+- destruct (Int64.eq m0 (Int64.repr (Int.unsigned n))) eqn:E; inv H.
+  apply Int64.same_if_eq in E; subst m0. InvEvalAll. eexists; split; [eassumption|].
+  match goal with |- Val.lessdef _ (Val.and ?v _) => destruct v end; simpl; auto.
+  rewrite loword_and, !loword_repr_unsigned; auto.
+- destruct (Int64.eq m0 (Int64.repr (Int.unsigned n))) eqn:E; inv H.
+  apply Int64.same_if_eq in E; subst m0. InvEvalAll.
+  match goal with H: eval_expr _ _ _ _ _ _ ?v |- _ => exists (Val.loword v); split; [EvalOp|destruct v] end;
+  simpl; auto. rewrite loword_and, loword_repr_unsigned; auto.
+Qed.
+
+
 Theorem eval_shl: binary_constructor_sound shl Val.shl.
 Proof.
-  red; intros until y; unfold shl; case (shl_match b); intros.
-- InvEval. apply eval_shlimm; auto.
-- TrivialExists.
+  red; intros until y; intros EA EB; unfold shl.
+  destruct (masked_count (Int.repr 31) b) as [t|] eqn:M.
+- exploit eval_masked_count; eauto. intros (v & A & B).
+  exists (Val.shl x (Val.and v (Vint (Int.repr 31)))); split. EvalOp.
+  inv B; auto. destruct x; auto.
+- revert EA EB. unfold shl_base; case (shl_base_match b); intros.
++ InvEval. apply eval_shlimm; auto.
++ TrivialExists.
 Qed.
 
 Theorem eval_shr: binary_constructor_sound shr Val.shr.
 Proof.
-  red; intros until y; unfold shr; case (shr_match b); intros.
-- InvEval. apply eval_shrimm; auto.
-- TrivialExists.
+  red; intros until y; intros EA EB; unfold shr.
+  destruct (masked_count (Int.repr 31) b) as [t|] eqn:M.
+- exploit eval_masked_count; eauto. intros (v & A & B).
+  exists (Val.shr x (Val.and v (Vint (Int.repr 31)))); split. EvalOp.
+  inv B; auto. destruct x; auto.
+- revert EA EB. unfold shr_base; case (shr_base_match b); intros.
++ InvEval. apply eval_shrimm; auto.
++ TrivialExists.
 Qed.
 
 Theorem eval_shru: binary_constructor_sound shru Val.shru.
 Proof.
-  red; intros until y; unfold shru; case (shru_match b); intros.
-- InvEval. apply eval_shruimm; auto.
-- TrivialExists.
+  red; intros until y; intros EA EB; unfold shru.
+  destruct (masked_count (Int.repr 31) b) as [t|] eqn:M.
+- exploit eval_masked_count; eauto. intros (v & A & B).
+  exists (Val.shru x (Val.and v (Vint (Int.repr 31)))); split. EvalOp.
+  inv B; auto. destruct x; auto.
+- revert EA EB. unfold shru_base; case (shru_base_match b); intros.
++ InvEval. apply eval_shruimm; auto.
++ TrivialExists.
 Qed.
 
 Theorem eval_negf: unary_constructor_sound negf Val.negf.

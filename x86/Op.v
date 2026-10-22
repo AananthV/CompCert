@@ -173,8 +173,16 @@ Inductive operation : Type :=
   | Osingleoflong            (**r [rd = float32_of_signed_long(r1)] *)
 (*c Boolean tests: *)
   | Ocmp (cond: condition)  (**r [rd = 1] if condition holds, [rd = 0] otherwise. *)
-  | Osel: condition -> typ -> operation.
+  | Osel: condition -> typ -> operation
                              (**r [rd = rs1] if condition holds, [rd = rs2] otherwise. *)
+(*c Shifts whose count is masked to 5 bits (32-bit) or 6 bits (64-bit),
+    as the hardware does for shifts by [%cl]: *)
+  | Oshlmask                 (**r [rd = r1 << (r2 & 31)] *)
+  | Oshrmask                 (**r [rd = r1 >> (r2 & 31)] (signed) *)
+  | Oshrumask                (**r [rd = r1 >> (r2 & 31)] (unsigned) *)
+  | Oshllmask                (**r [rd = r1 << (r2 & 63)] *)
+  | Oshrlmask                (**r [rd = r1 >> (r2 & 63)] (signed) *)
+  | Oshrlumask.              (**r [rd = r1 >> (r2 & 63)] (unsigned) *)
 
 (** Comparison functions (used in modules [CSE] and [Allocation]). *)
 
@@ -446,6 +454,12 @@ Definition eval_operation
   | Osingleoflong, v1::nil => Val.singleoflong v1
   | Ocmp c, _ => Some(Val.of_optbool (eval_condition c vl m))
   | Osel c ty, v1::v2::vl => Some(Val.select (eval_condition c vl m) v1 v2 ty)
+  | Oshlmask, v1::v2::nil => Some (Val.shl v1 (Val.and v2 (Vint (Int.repr 31))))
+  | Oshrmask, v1::v2::nil => Some (Val.shr v1 (Val.and v2 (Vint (Int.repr 31))))
+  | Oshrumask, v1::v2::nil => Some (Val.shru v1 (Val.and v2 (Vint (Int.repr 31))))
+  | Oshllmask, v1::v2::nil => Some (Val.shll v1 (Val.and v2 (Vint (Int.repr 63))))
+  | Oshrlmask, v1::v2::nil => Some (Val.shrl v1 (Val.and v2 (Vint (Int.repr 63))))
+  | Oshrlumask, v1::v2::nil => Some (Val.shrlu v1 (Val.and v2 (Vint (Int.repr 63))))
   | _, _ => None
   end.
 
@@ -623,6 +637,8 @@ Definition type_of_operation (op: operation) : list typ * typ :=
   | Osingleoflong => (Tlong :: nil, Tsingle)
   | Ocmp c => (type_of_condition c, Tint)
   | Osel c ty => (ty :: ty :: type_of_condition c, ty)
+  | Oshlmask | Oshrmask | Oshrumask => (Tint :: Tint :: nil, Tint)
+  | Oshllmask | Oshrlmask | Oshrlumask => (Tlong :: Tint :: nil, Tlong)
   end.
 
 (** Weak type soundness results for [eval_operation]:
@@ -786,6 +802,8 @@ Proof with (try exact I; try reflexivity).
   destruct v0; simpl in H0; inv H0...
   destruct (eval_condition cond vl m); simpl... destruct b...
   unfold Val.select. destruct (eval_condition c vl m). apply Val.normalize_type. exact I.
+  all: destruct v0; destruct v1; simpl; trivial;
+       match goal with |- context [if ?c then _ else _] => destruct c end...
 Qed.
 
 End SOUNDNESS.
@@ -1368,6 +1386,8 @@ Proof.
   apply Val.select_inject; auto.  
   destruct (eval_condition c vl1 m1) eqn:?; auto.
   right; symmetry; eapply eval_condition_inj; eauto.
+  all: inv H4; inv H2; simpl; auto;
+       match goal with |- context [if ?c then _ else _] => destruct c end; auto.
 Qed.
 
 End EVAL_COMPAT.

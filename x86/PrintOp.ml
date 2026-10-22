@@ -173,6 +173,12 @@ let print_operation reg pp = function
       fprintf pp "%a ?%s %a : %a"
          (print_condition reg) (c, args)
          (PrintAST.name_of_type ty) reg r1 reg r2
+  | Oshlmask, [r1;r2] -> fprintf pp "%a << (%a & 31)" reg r1 reg r2
+  | Oshrmask, [r1;r2] -> fprintf pp "%a >>s (%a & 31)" reg r1 reg r2
+  | Oshrumask, [r1;r2] -> fprintf pp "%a >>u (%a & 31)" reg r1 reg r2
+  | Oshllmask, [r1;r2] -> fprintf pp "%a <<l (%a & 63)" reg r1 reg r2
+  | Oshrlmask, [r1;r2] -> fprintf pp "%a >>ls (%a & 63)" reg r1 reg r2
+  | Oshrlumask, [r1;r2] -> fprintf pp "%a >>lu (%a & 63)" reg r1 reg r2
   | _ -> fprintf pp "<bad operator>"
 
 

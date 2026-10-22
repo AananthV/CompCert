@@ -824,25 +824,25 @@ Definition exec_instr (f: function) (i: instruction) (rs: regset) (m: mem) : out
   | Pnotq rd =>
       Next (nextinstr_nf (rs#rd <- (Val.notl rs#rd))) m
   | Psall_rcl rd =>
-      Next (nextinstr_nf (rs#rd <- (Val.shl rs#rd rs#RCX))) m
+      Next (nextinstr_nf (rs#rd <- (Val.shl  rs#rd (Val.and  rs#RCX (Vint (Int.repr 31)))))) m
   | Psalq_rcl rd =>
-      Next (nextinstr_nf (rs#rd <- (Val.shll rs#rd rs#RCX))) m
+      Next (nextinstr_nf (rs#rd <- (Val.shll  rs#rd (Val.and rs#RCX (Vint (Int.repr 63)))))) m
   | Psall_ri rd n =>
       Next (nextinstr_nf (rs#rd <- (Val.shl rs#rd (Vint n)))) m
   | Psalq_ri rd n =>
       Next (nextinstr_nf (rs#rd <- (Val.shll rs#rd (Vint n)))) m
   | Pshrl_rcl rd =>
-      Next (nextinstr_nf (rs#rd <- (Val.shru rs#rd rs#RCX))) m
+      Next (nextinstr_nf (rs#rd <- (Val.shru rs#rd (Val.and  rs#RCX (Vint (Int.repr 31)))))) m
   | Pshrq_rcl rd =>
-      Next (nextinstr_nf (rs#rd <- (Val.shrlu rs#rd rs#RCX))) m
+      Next (nextinstr_nf (rs#rd <- (Val.shrlu rs#rd (Val.and rs#RCX (Vint (Int.repr 63)))))) m
   | Pshrl_ri rd n =>
       Next (nextinstr_nf (rs#rd <- (Val.shru rs#rd (Vint n)))) m
   | Pshrq_ri rd n =>
       Next (nextinstr_nf (rs#rd <- (Val.shrlu rs#rd (Vint n)))) m
   | Psarl_rcl rd =>
-      Next (nextinstr_nf (rs#rd <- (Val.shr rs#rd rs#RCX))) m
+      Next (nextinstr_nf (rs#rd <- (Val.shr  rs#rd (Val.and  rs#RCX (Vint (Int.repr 31)))))) m
   | Psarq_rcl rd =>
-      Next (nextinstr_nf (rs#rd <- (Val.shrl rs#rd rs#RCX))) m
+      Next (nextinstr_nf (rs#rd <- (Val.shrl  rs#rd (Val.and rs#RCX (Vint (Int.repr 63)))))) m
   | Psarl_ri rd n =>
       Next (nextinstr_nf (rs#rd <- (Val.shr rs#rd (Vint n)))) m
   | Psarq_ri rd n =>

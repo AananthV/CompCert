@@ -57,6 +57,7 @@ Definition op_safe (op: operation) (n: nat) : bool :=
      | Oshl | Oshr | Oshru | Oshldimm _ | Omakelong
      | Osubl | Omull | Omullhs | Omullhu | Oandl | Oorl | Oxorl
      | Oshll | Oshrl | Oshrlu
+     | Oshlmask | Oshrmask | Oshrumask | Oshllmask | Oshrlmask | Oshrlumask
      | Oaddf | Osubf | Omulf | Odivf | Omaxf | Ominf
      | Oaddfs | Osubfs | Omulfs | Odivfs), 2%nat => true
   | Olea a, _ => addressing32_safe a n

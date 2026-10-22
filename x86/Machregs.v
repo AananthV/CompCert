@@ -219,6 +219,8 @@ Definition mregs_for_operation (op: operation): list (option mreg) * option mreg
   | Oshrl => (None :: Some CX :: nil, None)
   | Oshrlu => (None :: Some CX :: nil, None)
   | Oshrxlimm _ => (Some AX :: nil, Some AX)
+  | Oshlmask | Oshrmask | Oshrumask
+  | Oshllmask | Oshrlmask | Oshrlumask => (None :: Some CX :: nil, None)
   | _ => (nil, None)
   end.
 
@@ -353,6 +355,8 @@ Definition two_address_op (op: operation) : bool :=
   | Osingleoflong => false
   | Ocmp c => false
   | Osel c op => true
+  | Oshlmask | Oshrmask | Oshrumask => true
+  | Oshllmask | Oshrlmask | Oshrlumask => true
   end.
 
 (* Constraints on constant propagation for builtins *)

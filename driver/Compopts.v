@@ -51,6 +51,10 @@ Parameter optim_ivwiden: unit -> bool.
 (** Flag -fload-op.  For memory operands in arithmetic instructions. *)
 Parameter optim_loadop: unit -> bool.
 
+(** Flag -fshift-mask.  For dropping the masking of the count of
+    variable shifts, which the x86 hardware performs. *)
+Parameter optim_shiftmask: unit -> bool.
+
 (** Flag -fredundancy.  For dead code elimination. *)
 Parameter optim_redundancy: unit -> bool.
 
