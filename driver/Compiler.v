@@ -50,6 +50,7 @@ Require Allocation.
 Require Tunneling.
 Require Linearize.
 Require CleanupLabels.
+Require Loadop.
 Require Debugvar.
 Require Stacking.
 Require Asmgen.
@@ -75,6 +76,7 @@ Require Allocproof.
 Require Tunnelingproof.
 Require Linearizeproof.
 Require CleanupLabelsproof.
+Require Loadopproof.
 Require Debugvarproof.
 Require Stackingproof.
 Require Asmgenproof.
@@ -162,6 +164,7 @@ Definition transf_rtl_program (f: RTL.program) : res Asm.program :=
    @@ time "Branch tunneling" Tunneling.tunnel_program
   @@@ time "CFG linearization" Linearize.transf_program
    @@ time "Label cleanup" CleanupLabels.transf_program
+   @@ total_if Compopts.optim_loadop (time "Load-op fusion" Loadop.transf_program)
   @@@ partial_if Compopts.debug (time "Debugging info for local variables" Debugvar.transf_program)
   @@@ time "Mach generation" Stacking.transf_program
    @@ print print_Mach
@@ -286,6 +289,7 @@ Definition CompCert's_passes :=
   ::: mkpass Tunnelingproof.match_prog
   ::: mkpass Linearizeproof.match_prog
   ::: mkpass CleanupLabelsproof.match_prog
+  ::: mkpass (match_if Compopts.optim_loadop Loadopproof.match_prog)
   ::: mkpass (match_if Compopts.debug Debugvarproof.match_prog)
   ::: mkpass Stackingproof.match_prog
   ::: mkpass Asmgenproof.match_prog
@@ -340,7 +344,8 @@ Proof.
   set (p20 := Tunneling.tunnel_program p19) in *.
   destruct (Linearize.transf_program p20) as [p21|e] eqn:P21; simpl in T; try discriminate.
   set (p22 := CleanupLabels.transf_program p21) in *.
-  destruct (partial_if debug Debugvar.transf_program p22) as [p23|e] eqn:P23; simpl in T; try discriminate.
+  set (p22l := total_if optim_loadop Loadop.transf_program p22) in *.
+  destruct (partial_if debug Debugvar.transf_program p22l) as [p23|e] eqn:P23; simpl in T; try discriminate.
   destruct (Stacking.transf_program p23) as [p24|e] eqn:P24; simpl in T; try discriminate.
   unfold match_prog; simpl.
   exists p1; split. apply SimplExprproof.transf_program_match; auto.
@@ -371,6 +376,7 @@ Proof.
   exists p20; split. apply Tunnelingproof.transf_program_match.
   exists p21; split. apply Linearizeproof.transf_program_match; auto.
   exists p22; split. apply CleanupLabelsproof.transf_program_match; auto.
+  exists p22l; split. apply total_if_match. apply Loadopproof.transf_program_match.
   exists p23; split. eapply partial_if_match; eauto. apply Debugvarproof.transf_program_match.
   exists p24; split. apply Stackingproof.transf_program_match; auto.
   exists tp; split. apply Asmgenproof.transf_program_match; auto.
@@ -424,7 +430,7 @@ Ltac DestructM :=
       destruct H as (p & M & MM)
   end.
   repeat DestructM. subst tp.
-  assert (F: forward_simulation (Cstrategy.semantics p) (Asm.semantics p31)).
+  assert (F: forward_simulation (Cstrategy.semantics p) (Asm.semantics p32)).
   {
   eapply compose_forward_simulations.
     eapply SimplExprproof.transl_program_correct; eassumption.
@@ -480,6 +486,8 @@ Ltac DestructM :=
     eapply Linearizeproof.transf_program_correct; eassumption.
   eapply compose_forward_simulations.
     eapply CleanupLabelsproof.transf_program_correct; eassumption.
+  eapply compose_forward_simulations.
+    eapply match_if_simulation. eassumption. exact Loadopproof.transf_program_correct.
   eapply compose_forward_simulations.
     eapply match_if_simulation. eassumption. exact Debugvarproof.transf_program_correct.
   eapply compose_forward_simulations.

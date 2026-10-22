@@ -250,6 +250,18 @@ Proof.
   intros. monadInv H. destruct chunk; TailNoLabel.
 Qed.
 
+Remark transl_loadop_label:
+  forall op chunk addr args res k c,
+  transl_loadop op chunk addr args res k = OK c ->
+  tail_nolabel k c.
+Proof.
+  unfold transl_loadop; intros. monadInv H.
+  destruct op; try discriminate.
+  all: try (destruct chunk; try discriminate; TailNoLabel; fail).
+  destruct a; try discriminate. destruct chunk; try discriminate.
+  destruct (zeq z 0); try discriminate. TailNoLabel.
+Qed.
+
 Lemma transl_instr_label:
   forall f i ep k c,
   transl_instr f i ep k = OK c ->
@@ -267,6 +279,7 @@ Opaque loadind.
   destruct s0; TailNoLabel.
   destruct s0; TailNoLabel.
   eapply tail_nolabel_trans. eapply transl_cond_label; eauto. eapply mk_jcc_label.
+  eapply transl_loadop_label; eauto.
 Qed.
 
 Lemma transl_instr_label':
@@ -566,6 +579,24 @@ Opaque loadind.
   exists rs2; split. eauto.
   split. eapply agree_set_undef_mreg; eauto. congruence.
   simpl; congruence.
+
+- (* Mloadop *)
+  assert (eval_addressing tge sp addr rs##args = Some a).
+    rewrite <- H. apply eval_addressing_preserved. exact symbols_preserved.
+  exploit eval_addressing_lessdef. eapply preg_vals; eauto. eexact H2.
+  intros [a' [A B]]. rewrite (sp_val _ _ _ AG) in A.
+  exploit Mem.loadv_extends; eauto. intros [v' [C D]].
+  assert (E: eval_operation tge sp op (rs res :: v :: nil) m = Some w).
+    rewrite <- H1. apply eval_operation_preserved. exact symbols_preserved.
+  assert (LD: Val.lessdef_list (rs res :: v :: nil) (rs0 (preg_of res) :: v' :: nil))
+    by (constructor; [eapply preg_val; eauto | constructor; auto]).
+  exploit eval_operation_lessdef. eexact LD. eauto. eexact E.
+  intros [w' [F G]]. rewrite (sp_val _ _ _ AG) in F.
+  left; eapply exec_straight_steps; eauto; intros. simpl in TR.
+  exploit transl_loadop_correct; eauto. intros [rs2 [P [Q R]]].
+  exists rs2; split. eauto.
+  split. eapply agree_set_undef_mreg; eauto. eapply Val.lessdef_trans; eauto.
+  simpl; intros; discriminate.
 
 - (* Mstore *)
   assert (eval_addressing tge sp addr rs##args = Some a).

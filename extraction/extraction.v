@@ -109,6 +109,8 @@ Extract Constant Compopts.optim_ivwiden =>
   "fun _ -> !Clflags.option_fivwiden".
 Extract Constant Compopts.optim_loadfwd =>
   "fun _ -> !Clflags.option_floadfwd".
+Extract Constant Compopts.optim_loadop =>
+  "fun _ -> !Clflags.option_floadop".
 Extract Constant Compopts.optim_redundancy =>
   "fun _ -> !Clflags.option_fredundancy".
 Extract Constant Compopts.thumb =>

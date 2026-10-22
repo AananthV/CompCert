@@ -1522,6 +1522,50 @@ Proof.
   intros. unfold rs2. Simplifs.
 Qed.
 
+Lemma transl_loadop_correct:
+  forall op chunk addr args res k c (rs: regset) m a v w,
+  transl_loadop op chunk addr args res k = OK c ->
+  eval_addressing ge (rs#RSP) addr (map rs (map preg_of args)) = Some a ->
+  Mem.loadv chunk m a = Some v ->
+  eval_operation ge (rs#RSP) op (rs#(preg_of res) :: v :: nil) m = Some w ->
+  exists rs',
+     exec_straight ge fn c rs m k rs' m
+  /\ Val.lessdef w rs'#(preg_of res)
+  /\ forall r, data_preg r = true -> r <> preg_of res -> rs'#r = rs#r.
+Proof.
+  unfold transl_loadop; intros. monadInv H.
+  exploit transl_addressing_mode_correct; eauto. intro EA.
+  assert (EA': eval_addrmode ge x rs = a). destruct a; simpl in H1; try discriminate; inv EA; auto.
+  assert (GEN: forall (f: val -> val -> val) (setflags: bool) i,
+    (forall rs1 m1, exec_instr ge fn i rs1 m1 = exec_loadop ge chunk f setflags m1 x rs1 (preg_of res)) ->
+    Val.lessdef w (f (rs (preg_of res)) v) ->
+    exists rs',
+       exec_straight ge fn (i :: k) rs m k rs' m
+    /\ Val.lessdef w rs'#(preg_of res)
+    /\ forall r, data_preg r = true -> r <> preg_of res -> rs'#r = rs#r).
+  { intros f setflags i EXEC LD.
+    assert (PCX: forall rs1: regset, ((if setflags then nextinstr_nf else nextinstr) rs1) PC
+                                     = Val.offset_ptr (rs1 PC) Ptrofs.one)
+      by (destruct setflags; auto).
+    exists ((if setflags then nextinstr_nf else nextinstr) (rs#(preg_of res) <- (f (rs (preg_of res)) v))).
+    split. apply exec_straight_one. rewrite EXEC. unfold exec_loadop. rewrite EA', H1. auto.
+    rewrite PCX. decEq. apply Pregmap.gso; auto with asmgen.
+    destruct setflags; split.
+    rewrite nextinstr_nf_inv1 by (apply preg_of_data). rewrite Pregmap.gss; auto.
+    intros; Simplifs.
+    rewrite nextinstr_inv by auto with asmgen. rewrite Pregmap.gss; auto.
+    intros; Simplifs. }
+  destruct op; try discriminate.
+  all: try (destruct chunk; try discriminate; ArgsInv;
+            inv H2; eapply GEN; [intros; reflexivity | auto]; fail).
+  destruct a0; try discriminate. destruct chunk; try discriminate.
+  destruct (zeq z 0); try discriminate. subst z. ArgsInv.
+  eapply GEN. intros; reflexivity.
+  simpl in H2. inv H2.
+  unfold Val.add; destruct Archi.ptr64; destruct (rs x0), v; simpl; auto;
+  rewrite ? Int.add_zero, ? Ptrofs.add_zero; auto.
+Qed.
+
 Lemma transl_store_correct:
   forall chunk addr args src k c (rs: regset) m a m',
   transl_store chunk addr args src k = OK c ->

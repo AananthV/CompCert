@@ -1326,6 +1326,30 @@ Proof.
   destruct sl; auto || congruence.
 Qed.
 
+Lemma return_regs_res_agree_callee_save:
+  forall sg caller callee,
+  agree_callee_save caller (return_regs_res sg caller callee).
+Proof.
+  intros; red; intros. unfold return_regs_res. red in H.
+  destruct l.
+  rewrite H; auto.
+  destruct sl; auto || congruence.
+Qed.
+
+Lemma return_regs_res_result:
+  forall sg caller callee,
+  Locmap.getpair (map_rpair R (loc_result sg)) (return_regs_res sg caller callee)
+  = Locmap.getpair (map_rpair R (loc_result sg)) callee.
+Proof.
+  intros.
+  assert (RR: forall r, In r (regs_of_rpair (loc_result sg)) -> result_reg sg r = true).
+  { intros. unfold result_reg. destruct (In_dec mreg_eq r (regs_of_rpair (loc_result sg))); auto. }
+  generalize (loc_result_caller_save sg). unfold return_regs_res.
+  destruct (loc_result sg) as [r | rhi rlo] eqn:LR; simpl in *.
+- intros A. rewrite A, RR; auto.
+- intros [A B]. rewrite A, B, ! RR; auto.
+Qed.
+
 Lemma no_caller_saves_sound:
   forall e q,
   no_caller_saves e = true ->
@@ -1458,16 +1482,19 @@ Qed.
 
 Lemma call_regs_param_values:
   forall sg ls,
-  map (fun p => Locmap.getpair p (call_regs ls)) (loc_parameters sg)
+  map (fun p => Locmap.getpair p (call_regs sg ls)) (loc_parameters sg)
   = map (fun p => Locmap.getpair p ls) (loc_arguments sg).
 Proof.
   intros. unfold loc_parameters. rewrite list_map_compose.
   apply list_map_exten; intros. symmetry.
-  assert (A: forall l, loc_argument_acceptable l -> call_regs ls (parameter_of_argument l) = ls l).
-  { destruct l as [r | [] ofs ty]; simpl; auto; contradiction. }
+  assert (A: forall l, In l (regs_of_rpairs (loc_arguments sg)) ->
+             loc_argument_acceptable l -> call_regs sg ls (parameter_of_argument l) = ls l).
+  { intros l IN ACC. destruct l as [r | [] ofs ty]; simpl; auto; try contradiction.
+    unfold param_reg. destruct (In_dec Loc.eq (R r) (regs_of_rpairs (loc_arguments sg))); try contradiction.
+    simpl. rewrite orb_true_r. auto. }
   exploit loc_arguments_acceptable; eauto. destruct x; simpl; intros.
-- auto.
-- destruct H0; f_equal; auto.
+- apply A; auto. eapply in_regs_of_rpairs; eauto. simpl; auto.
+- destruct H0; f_equal; apply A; auto; eapply in_regs_of_rpairs; eauto; simpl; auto.
 Qed.
 
 Lemma return_regs_arg_values:
@@ -2411,7 +2438,7 @@ Proof.
   eapply star_right. eexact A1.
   econstructor. eauto. eauto. traceEq.
   simpl. econstructor; eauto.
-  apply return_regs_agree_callee_save.
+  apply return_regs_res_agree_callee_save.
   constructor.
 + (* with an argument *)
   exploit (exec_moves mv); eauto. intros [ls1 [A1 B1]].
@@ -2420,16 +2447,10 @@ Proof.
   eapply star_right. eexact A1.
   econstructor. eauto. eauto. traceEq.
   simpl. econstructor; eauto. rewrite <- H11.
-  replace (Locmap.getpair (map_rpair R (loc_result (RTL.fn_sig f)))
-                          (return_regs (parent_locset ts) ls1))
-  with (Locmap.getpair (map_rpair R (loc_result (RTL.fn_sig f))) ls1).
+  rewrite return_regs_res_result.
   eapply add_equations_res_lessdef; eauto.
   rewrite <- H14. apply WTRS.
-  generalize (loc_result_caller_save (RTL.fn_sig f)).
-  destruct (loc_result (RTL.fn_sig f)); simpl.
-  intros A; rewrite A; auto.
-  intros [A B]; rewrite A, B; auto.
-  apply return_regs_agree_callee_save.
+  apply return_regs_res_agree_callee_save.
   rewrite <- H11, <- H14. apply WTRS.
 
 (* internal function *)

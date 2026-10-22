@@ -713,6 +713,22 @@ module Target(System: SYSTEM):TARGET =
           fprintf oc "	mulsd	%a, %a\n" freg r1 freg rd
       | Pdivd_ff(rd, r1) ->
           fprintf oc "	divsd	%a, %a\n" freg r1 freg rd
+      | Paddd_fm(rd, a) ->
+          fprintf oc "	addsd	%a, %a\n" addressing a freg rd
+      | Psubd_fm(rd, a) ->
+          fprintf oc "	subsd	%a, %a\n" addressing a freg rd
+      | Pmuld_fm(rd, a) ->
+          fprintf oc "	mulsd	%a, %a\n" addressing a freg rd
+      | Pdivd_fm(rd, a) ->
+          fprintf oc "	divsd	%a, %a\n" addressing a freg rd
+      | Paddl_rm(rd, a) ->
+          fprintf oc "	addl	%a, %a\n" addressing a ireg32 rd
+      | Pxorl_rm(rd, a) ->
+          fprintf oc "	xorl	%a, %a\n" addressing a ireg32 rd
+      | Pandl_rm(rd, a) ->
+          fprintf oc "	andl	%a, %a\n" addressing a ireg32 rd
+      | Porl_rm(rd, a) ->
+          fprintf oc "	orl	%a, %a\n" addressing a ireg32 rd
       | Pnegd (rd) ->
           need_masks := true;
           fprintf oc "	xorpd	%a%s, %a\n"

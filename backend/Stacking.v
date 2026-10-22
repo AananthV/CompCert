@@ -161,6 +161,8 @@ Definition transl_instr
       Mop (transl_op fe op) args res :: k
   | Lload chunk addr args dst =>
       Mload (simplify_load chunk) (transl_addr fe addr) args dst :: k
+  | Lloadop op chunk addr args res =>
+      Mloadop (transl_op fe op) (simplify_load chunk) (transl_addr fe addr) args res :: k
   | Lstore chunk addr args src =>
       Mstore (simplify_store chunk) (transl_addr fe addr) args src :: k
   | Lcall sig ros =>

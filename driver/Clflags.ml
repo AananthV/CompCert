@@ -33,6 +33,7 @@ let option_fredundancy = ref true
 let option_flooprotate = ref true
 let option_flicm = ref true
 let option_fivwiden = ref true
+let option_floadop = ref false
 let option_fifconversion = ref true
 let option_Obranchless = ref false
 let option_falignfunctions = ref (None: int option)

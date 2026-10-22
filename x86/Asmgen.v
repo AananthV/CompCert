@@ -683,6 +683,28 @@ Definition transl_load (chunk: memory_chunk)
       Error (msg "Asmgen.transl_load")
   end.
 
+(** Translation of a load combined with an arithmetic operation
+  ([Mloadop], produced by the [Loadop] pass).  The memory operand is the
+  second argument of the operation. *)
+
+Definition transl_loadop (op: operation) (chunk: memory_chunk)
+                         (addr: addressing) (args: list mreg) (dst: mreg)
+                         (k: code) : res code :=
+  do am <- transl_addressing addr args;
+  match op, chunk with
+  | Oaddf, Mfloat64 => do r <- freg_of dst; OK (Paddd_fm r am :: k)
+  | Osubf, Mfloat64 => do r <- freg_of dst; OK (Psubd_fm r am :: k)
+  | Omulf, Mfloat64 => do r <- freg_of dst; OK (Pmuld_fm r am :: k)
+  | Odivf, Mfloat64 => do r <- freg_of dst; OK (Pdivd_fm r am :: k)
+  | Oand, Mint32 => do r <- ireg_of dst; OK (Pandl_rm r am :: k)
+  | Oor, Mint32 => do r <- ireg_of dst; OK (Porl_rm r am :: k)
+  | Oxor, Mint32 => do r <- ireg_of dst; OK (Pxorl_rm r am :: k)
+  | Olea (Aindexed2 n), Mint32 =>
+      if zeq n 0 then do r <- ireg_of dst; OK (Paddl_rm r am :: k)
+      else Error (msg "Asmgen.transl_loadop")
+  | _, _ => Error (msg "Asmgen.transl_loadop")
+  end.
+
 Definition transl_store (chunk: memory_chunk)
                         (addr: addressing) (args: list mreg) (src: mreg)
                         (k: code) : res code :=
@@ -749,6 +771,8 @@ Definition transl_instr (f: Mach.function) (i: Mach.instruction)
           Pret :: k)
   | Mbuiltin ef args res =>
       OK (Pbuiltin ef (List.map (map_builtin_arg preg_of) args) (map_builtin_res preg_of res) :: k)
+  | Mloadop op chunk addr args res =>
+      transl_loadop op chunk addr args res k
   end.
 
 (** Translation of a code sequence *)

@@ -259,6 +259,8 @@ Definition transfer (lm: labelmap) (before: option avail) (i: instruction):
           (lm1, before)
       | Ljumptable r lbls =>
           (update_labels lbls s lm, None)
+      | Lloadop op chunk addr args dst =>
+          (lm, Some (kill (R dst) s))
       | Lreturn =>
           (lm, None)
       end

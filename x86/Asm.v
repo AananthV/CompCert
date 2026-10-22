@@ -222,6 +222,14 @@ Inductive instruction: Type :=
   | Psubd_ff (rd: freg) (r1: freg)
   | Pmuld_ff (rd: freg) (r1: freg)
   | Pdivd_ff (rd: freg) (r1: freg)
+  | Paddd_fm (rd: freg) (a: addrmode)   (**r [addsd mem, rd] *)
+  | Psubd_fm (rd: freg) (a: addrmode)   (**r [subsd mem, rd] *)
+  | Pmuld_fm (rd: freg) (a: addrmode)   (**r [mulsd mem, rd] *)
+  | Pdivd_fm (rd: freg) (a: addrmode)   (**r [divsd mem, rd] *)
+  | Paddl_rm (rd: ireg) (a: addrmode)   (**r [addl mem, rd] *)
+  | Pxorl_rm (rd: ireg) (a: addrmode)   (**r [xorl mem, rd] *)
+  | Pandl_rm (rd: ireg) (a: addrmode)   (**r [andl mem, rd] *)
+  | Porl_rm  (rd: ireg) (a: addrmode)   (**r [orl mem, rd] *)
   | Pnegd (rd: freg)
   | Pabsd (rd: freg)
   | Pcomisd_ff (r1 r2: freg)
@@ -584,6 +592,13 @@ Definition exec_load (chunk: memory_chunk) (m: mem)
   | None => Stuck
   end.
 
+Definition exec_loadop (chunk: memory_chunk) (f: val -> val -> val) (setflags: bool)
+                       (m: mem) (a: addrmode) (rs: regset) (rd: preg) :=
+  match Mem.loadv chunk m (eval_addrmode a rs) with
+  | Some v => Next ((if setflags then nextinstr_nf else nextinstr) (rs#rd <- (f rs#rd v))) m
+  | None => Stuck
+  end.
+
 Definition exec_store (chunk: memory_chunk) (m: mem)
                       (a: addrmode) (rs: regset) (r1: preg)
                       (destroyed: list preg) :=
@@ -880,6 +895,14 @@ Definition exec_instr (f: function) (i: instruction) (rs: regset) (m: mem) : out
       Next (nextinstr (rs#rd <- (Val.mulf rs#rd rs#r1))) m
   | Pdivd_ff rd r1 =>
       Next (nextinstr (rs#rd <- (Val.divf rs#rd rs#r1))) m
+  | Paddd_fm rd a => exec_loadop Mfloat64 Val.addf false m a rs rd
+  | Psubd_fm rd a => exec_loadop Mfloat64 Val.subf false m a rs rd
+  | Pmuld_fm rd a => exec_loadop Mfloat64 Val.mulf false m a rs rd
+  | Pdivd_fm rd a => exec_loadop Mfloat64 Val.divf false m a rs rd
+  | Paddl_rm rd a => exec_loadop Mint32 Val.add true m a rs rd
+  | Pxorl_rm rd a => exec_loadop Mint32 Val.xor true m a rs rd
+  | Pandl_rm rd a => exec_loadop Mint32 Val.and true m a rs rd
+  | Porl_rm  rd a => exec_loadop Mint32 Val.or  true m a rs rd
   | Pnegd rd =>
       Next (nextinstr (rs#rd <- (Val.negf rs#rd))) m
   | Pabsd rd =>

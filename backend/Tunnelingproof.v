@@ -489,9 +489,21 @@ Proof.
 Qed.
 
 Lemma call_regs_lessdef:
-  forall ls1 ls2, locmap_lessdef ls1 ls2 -> locmap_lessdef (call_regs ls1) (call_regs ls2).
+  forall sg ls1 ls2, locmap_lessdef ls1 ls2 -> locmap_lessdef (call_regs sg ls1) (call_regs sg ls2).
 Proof.
   intros; red; intros. destruct l as [r | [] ofs ty]; simpl; auto.
+  destruct (Conventions1.is_callee_save r || param_reg sg r); auto.
+Qed.
+
+Lemma return_regs_res_lessdef:
+  forall sg caller1 callee1 caller2 callee2,
+  locmap_lessdef caller1 caller2 ->
+  locmap_lessdef callee1 callee2 ->
+  locmap_lessdef (return_regs_res sg caller1 callee1) (return_regs_res sg caller2 callee2).
+Proof.
+  intros; red; intros. destruct l; simpl.
+- destruct (Conventions1.is_callee_save r); auto. destruct (result_reg sg r); auto.
+- destruct sl; auto.
 Qed.
 
 Lemma return_regs_lessdef:
@@ -655,7 +667,7 @@ Proof.
   exploit Mem.free_parallel_extends. eauto. eauto. intros (tm' & FREE & MEM'). 
   left; simpl; econstructor; split.
   eapply exec_Lreturn; eauto.
-  constructor; eauto using return_regs_lessdef, match_parent_locset.
+  constructor; eauto using return_regs_res_lessdef, match_parent_locset.
 - (* internal function *)
   exploit Mem.alloc_extends. eauto. eauto. apply Z.le_refl. apply Z.le_refl.
   intros (tm' & ALLOC & MEM'). 

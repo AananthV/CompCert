@@ -449,6 +449,16 @@ Proof.
   eauto. eauto.
   apply eval_add_delta_ranges. traceEq.
   constructor; auto.
+- (* loadop *)
+  econstructor; split.
+  eapply plus_left.
+  eapply exec_Lloadop with (a := a) (w := w).
+  rewrite <- H; apply eval_addressing_preserved; exact symbols_preserved.
+  eauto.
+  rewrite <- H1; apply eval_operation_preserved; exact symbols_preserved.
+  eauto.
+  apply eval_add_delta_ranges. traceEq.
+  constructor; auto.
 - (* store *)
   econstructor; split.
   eapply plus_left.
@@ -505,9 +515,10 @@ Proof.
   apply eval_add_delta_ranges. reflexivity. traceEq.
   constructor; auto.
 - (* return *)
+  assert (SIG: fn_sig tf = fn_sig f) by (inv TRF; auto).
   econstructor; split.
   apply plus_one.  constructor. inv TRF; eauto. traceEq.
-  rewrite (parent_locset_match _ _ STACKS). constructor; auto.
+  rewrite SIG, (parent_locset_match _ _ STACKS). constructor; auto.
 - (* internal function *)
   monadInv H7. rename x into tf.
   assert (MF: match_function f tf) by (apply transf_function_match; auto).
