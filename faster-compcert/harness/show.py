@@ -13,5 +13,7 @@ for p in base:
     print(p.ljust(12), *[('%.4f' % d[c][p] if d[c].get(p) else 'FAIL').rjust(16) for c in cs])
 def gm(c):
     ps = [p for p in base if d[c].get(p) and base[p]]
-    return math.exp(sum(math.log(d[c][p] / base[p]) for p in ps) / len(ps))
-print(('geomean/' + cs[0])[:12].ljust(12), *[('%.3f' % gm(c)).rjust(16) for c in cs])
+    if not ps:
+        return 'n/a'
+    return '%.3f' % math.exp(sum(math.log(d[c][p] / base[p]) for p in ps) / len(ps))
+print(('geomean/' + cs[0])[:12].ljust(12), *[gm(c).rjust(16) for c in cs])
