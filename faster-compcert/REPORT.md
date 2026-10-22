@@ -1079,3 +1079,26 @@ larger functions after inlining.
   depends on iteration order.
 
 #9 stays open for these.
+
+---
+
+## 15. Status after rounds 1-3 (measured 2026-10-22)
+
+All compilers were measured in one session. Geomean run time relative to
+CompCert 3.18 (lower is faster):
+
+| suite | faster-compcert | gcc -O1 | gcc -O2 (CompCert model) | gcc -O2 | gap to gcc-O2-ccmodel closed |
+|---|---:|---:|---:|---:|---:|
+| `test/c` (tuned on) | **0.862** | 0.889 | 0.791 | 0.783 | 63% |
+| big (held out) | **0.969** | 0.951 | 0.890 | 0.883 | 27% |
+| PolyBench (held out) | **0.751** | 0.763 | 0.646 | 0.670 | 66% |
+
+faster-compcert is faster than gcc -O1 on `test/c` (−3.1%) and PolyBench
+(−1.6%), slower on the big programs (+1.9%), and about 1.10-1.12× gcc -O2's
+run time on all three suites.
+
+Two caveats on these numbers:
+- gcc -O2 measuring slower than gcc-O2-ccmodel on PolyBench (0.670 vs 0.646)
+  is within this machine's noise for memory-bound kernels (§11).
+- The big programs (pointer-heavy and call-heavy code) remain the least
+  improved.
