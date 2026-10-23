@@ -203,6 +203,11 @@ Processing options:
   -fredundancy   Perform redundancy elimination [on]
   -fload-op      Use memory operands in arithmetic instructions [off]
   -fshift-mask   Rely on the hardware masking of variable shift counts [off]
+  -ftrust-libm   Compile calls to the libm functions sqrt and fabs as the
+                 builtins __builtin_fsqrt and __builtin_fabs, assuming that
+                 they compute the IEEE 754 square root and absolute value.
+                 Like GCC's -fno-math-errno, errno is not set (e.g. sqrt of a
+                 negative number does not set errno to EDOM) [off]
   -finline       Perform inlining of functions [on]
   -finline-functions-called-once Integrate functions only required by their
                  single caller [on]
@@ -409,6 +414,7 @@ let cmdline_actions =
   @ f_opt "iv-widen" option_fivwiden
   @ f_opt "load-op" option_floadop
   @ f_opt "shift-mask" option_fshiftmask
+  @ f_opt "trust-libm" option_ftrust_libm
   @ f_opt "redundancy" option_fredundancy
   @ f_opt "inline" option_finline
   @ f_opt "inline-functions-called-once" option_finline_functions_called_once
