@@ -1207,3 +1207,32 @@ by about 2.7%, almost entirely from one 20-line microbenchmark, and the
 held-out suites do not move. It was merged because it costs nothing at compile
 time and has no regressions. It should not be counted as evidence of general
 progress.
+
+---
+
+## 19. Third trusted-base change: `sqrt`/`fabs` as builtins (issue #12, phase 1)
+
+**What it does.** Under `-ftrust-libm` (off by default), the C front end
+rewrites calls to libm's `sqrt` and `fabs` into CompCert's existing builtins,
+which have exact IEEE semantics. It does so only when the callee really is the
+external libm function: exact prototype, not defined in the program, not
+static, and address never taken. The trusted assumption is that glibc's
+`sqrt`/`fabs` are IEEE-754 correct, and that `errno` is not set (as with
+`-fno-math-errno`). See ledger entry 5.
+
+**Validation.**
+- **libm vs model:** 15M inputs per function, compared bit for bit against the
+  extracted semantics: 0 mismatches, including NaN payloads and negative
+  inputs.
+- **Rewrite rules:** 26 unit compilations check which declarations are
+  rewritten.
+- **Flag off:** generated code is byte-identical on 132 files.
+
+**Results with `-ftrust-libm`** (same session):
+- **nbody −17%** (0.203 → 0.168 s; the agent and my re-run agree);
+- almabench −1.3%;
+- fft −1.1%;
+- raytracer −0.8%.
+
+13 files change code. Without the `sqrtsd` false-dependency fix from round 1,
+this change would have made nbody *slower* (§1.3).

@@ -38,6 +38,8 @@ Changes, each fully proved:
 | x86 shift-count masking in the Asm model, plus masked-shift selection (#11; **trusted-base change**) | `-fshift-mask` (off by default) | nsievebits 0.94x |
 | new pass `Tailacc` (accumulator tail recursion) + bounded recursive inlining (#8) | `-ftail-acc`, `-finline-recursive-depth N` | fib 0.54x (narrow: fib only) |
 
+| `sqrt`/`fabs` calls become exact builtins (#12 phase 1; **trusted-base change**) | `-ftrust-libm` (off by default) | nbody 0.83x |
+
 Verification:
 
 - No new axioms. The only new entries in `Print Assumptions` are three flags
@@ -65,6 +67,8 @@ Known gaps and next steps are in [REPORT.md, section 5](REPORT.md#5-what-remains
 - `harness/compile_cost.py`: compile time and peak memory on large inputs
   (`test/abi/layout.c`, `staticlayout.c`, spass, `test/c`), under a memory
   cap, to catch compile-time blow-ups.
+- `harness/libm_difftest/`: differential test of glibc `sqrt`/`fabs` against
+  the extracted builtin semantics, plus rewrite unit tests.
 - `harness/asm_difftest/`: differential test of new Asm instruction
   semantics against the CPU, using the extracted Coq semantics.
 - `harness/asmstats.py`: static statistics of one function, old vs. new `.s`.
