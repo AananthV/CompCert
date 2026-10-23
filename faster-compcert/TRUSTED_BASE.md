@@ -130,3 +130,42 @@ semantics:
 **Revert.** Restore the six cases. Then remove the masked operators
 (`Oshlmask`, …), their selection rules and the `-fshift-mask` flag.
 
+## 5. `sqrt`/`fabs` as exact builtins under `-ftrust-libm` (#12, phase 1)
+
+- **Approved:** by the owner, 2026-10-22, for phase 1 of the proposal on #12.
+- **Merged in:** "C2C: opt-in -ftrust-libm rewrites sqrt/fabs calls into exact builtins".
+- **Flag:** `-ftrust-libm`, off by default. It is OCaml-only, so there is no
+  new Coq parameter.
+
+**Assumption.** The C front end (`cfrontend/C2C.ml`) rewrites a call to `sqrt`
+or `fabs` into `__builtin_fsqrt` / `__builtin_fabs` when all of these hold:
+- the callee is the unique, non-static, external (undefined in the program)
+  global with exactly the prototype `double(double)`;
+- its name never appears outside direct-callee position.
+
+We trust that, on the target platform:
+- `sqrt` is the IEEE-754 correctly rounded square root (`Float.sqrt`), and
+  `fabs` clears the sign bit (`Float.abs`), for all inputs including NaN
+  payloads;
+- **`errno` is not set:** sqrt of a negative number does not set `EDOM`, like
+  GCC's `-fno-math-errno`. This is documented in the flag's help text.
+
+**Justification.** IEEE 754-2008 §5.4.1 (correctly rounded `squareRoot`). C11
+Annex F.10.4.5 and F.10.4.2 (`__STDC_IEC_559__` is defined by glibc on x86-64).
+
+**Validation.** `harness/libm_difftest/` compares glibc 2.35 (called through
+volatile pointers, `-fno-builtin`) against the extracted semantics of the
+rewritten code.
+- Inputs: 15M per function, two seeds. That is 38 special values, 10^7 random
+  bit patterns, exact squares ±1 ulp, and subnormals.
+- Result: **0 mismatches**, including NaN payload propagation and negative
+  inputs (default NaN). The only difference is `errno`.
+- `rewrite.sh`: 26 compilations confirm which declarations are and are not
+  rewritten: own definitions, `static`, address taken, other prototypes,
+  shadowing.
+
+**Platform scope.** Validated for glibc 2.35 on x86-64 only.
+
+**Revert.** Remove `trusted_libm` / `trusted_libm_calls` and the call case in
+`C2C.ml`, and the flag.
+

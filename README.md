@@ -61,8 +61,10 @@ Progress so far:
   `-fshift-mask`; [#11](https://github.com/AananthV/CompCert/issues/11)).
 - [x] Retroactive review of the round-1 trusted-base changes
   ([#10](https://github.com/AananthV/CompCert/issues/10)).
-- [ ] Opt-in libm builtins (`sqrt`, `floor`) and unaligned 64-bit accesses:
-  these need changes to the trusted model.
+- [x] Opt-in `sqrt`/`fabs` builtins, `-ftrust-libm` (approved trusted-base
+  change; nbody −17%; [#12](https://github.com/AananthV/CompCert/issues/12) phase 1).
+- [ ] Pure libm functions (`floor`, `sin`, `cos`; #12 phase 2) and unaligned
+  64-bit accesses (#13): approved or awaiting proposal.
 - [x] Fix the Loadfwd compile-time/memory blow-up on large functions (65 GB →
   112 MB on `test/abi/layout.c`; [#19](https://github.com/AananthV/CompCert/issues/19)).
 - [ ] Reduce the remaining compile-time overhead: first round done
