@@ -137,6 +137,10 @@ Inductive instruction: Type :=
   | Pmovzw_rm (rd: ireg) (a: addrmode)
   | Pmovsw_rr (rd: ireg) (rs: ireg)     (**r [movsw] (16-bit sign-extension) *)
   | Pmovsw_rm (rd: ireg) (a: addrmode)
+  | Pmovzbq_rm (rd: ireg) (a: addrmode)   (**r [movzbl mem, rd], 64-bit result *)
+  | Pmovzwq_rm (rd: ireg) (a: addrmode)   (**r [movzwl mem, rd], 64-bit result *)
+  | Pmovzbq_rr (rd: ireg) (r1: ireg)      (**r [movzbl r1, rd], 64-bit result *)
+  | Pmovzwq_rr (rd: ireg) (r1: ireg)      (**r [movzwl r1, rd], 64-bit result *)
   | Pmovzl_rr (rd: ireg) (rs: ireg)     (**r [movzl] (32-bit zero-extension) *)
   | Pmovsl_rr (rd: ireg) (rs: ireg)     (**r [movsl] (32-bit sign-extension) *)
   | Pmovls_rr (rd: ireg)                (** 64 to 32 bit conversion (pseudo) *)
@@ -592,6 +596,13 @@ Definition exec_load (chunk: memory_chunk) (m: mem)
   | None => Stuck
   end.
 
+Definition exec_load_zx (chunk: memory_chunk) (m: mem)
+                        (a: addrmode) (rs: regset) (rd: preg) :=
+  match Mem.loadv chunk m (eval_addrmode a rs) with
+  | Some v => Next (nextinstr_nf (rs#rd <- (Val.longofintu v))) m
+  | None => Stuck
+  end.
+
 Definition exec_loadop (chunk: memory_chunk) (f: val -> val -> val) (setflags: bool)
                        (m: mem) (a: addrmode) (rs: regset) (rd: preg) :=
   match Mem.loadv chunk m (eval_addrmode a rs) with
@@ -688,6 +699,10 @@ Definition exec_instr (f: function) (i: instruction) (rs: regset) (m: mem) : out
       Next (nextinstr (rs#rd <- (Val.sign_ext 16 rs#r1))) m
   | Pmovsw_rm rd a =>
       exec_load Mint16signed m a rs rd
+  | Pmovzbq_rm rd a  => exec_load_zx Mint8unsigned m a rs rd
+  | Pmovzwq_rm rd a  => exec_load_zx Mint16unsigned m a rs rd
+  | Pmovzbq_rr rd r1 => Next (nextinstr (rs#rd <- (Val.longofintu (Val.zero_ext 8 rs#r1)))) m
+  | Pmovzwq_rr rd r1 => Next (nextinstr (rs#rd <- (Val.longofintu (Val.zero_ext 16 rs#r1)))) m
   | Pmovzl_rr rd r1 =>
       Next (nextinstr (rs#rd <- (Val.longofintu rs#r1))) m
   | Pmovsl_rr rd r1 =>

@@ -86,13 +86,38 @@ Proof.
 - TrivialExists.
 Qed.
 
+Lemma loadv_zero_ext:
+  forall chunk m a v, Mem.loadv chunk m a = Some v ->
+  match chunk with
+  | Mint8unsigned => Val.zero_ext 8 v = v
+  | Mint16unsigned => Val.zero_ext 16 v = v
+  | _ => True
+  end.
+Proof.
+  intros. destruct a; simpl in H; try discriminate. destruct (zle _ _); try discriminate.
+  generalize (Mem.load_cast _ _ _ _ _ H). destruct chunk; auto.
+Qed.
+
+Lemma eval_longofintu_base: unary_constructor_sound longofintu_base Val.longofintu.
+Proof.
+  red; intros. unfold longofintu_base. destruct (longofintu_base_match a); InvEval; TrivialExists.
+Qed.
+
 Theorem eval_longofintu: unary_constructor_sound longofintu Val.longofintu.
 Proof.
   unfold longofintu; destruct Archi.splitlong. apply SplitLongproof.eval_longofintu.
   red; intros. destruct (is_intconst a) as [n|] eqn:C.
 - econstructor; split. apply eval_longconst.
   exploit is_intconst_sound; eauto. intros; subst x. auto.
-- unfold longofintu_base. destruct (longofintu_base_match a); InvEval; TrivialExists.
+- destruct (Compopts.optim_zextload tt). 2: apply eval_longofintu_base; auto.
+  unfold longofintu_zext. destruct (longofintu_zext_match a).
++ exists (Val.longofintu (Val.zero_ext 8 x)); split. EvalOp.
+  inv H. exploit loadv_zero_ext; eauto. simpl; intros ->; auto.
++ exists (Val.longofintu (Val.zero_ext 16 x)); split. EvalOp.
+  inv H. exploit loadv_zero_ext; eauto. simpl; intros ->; auto.
++ InvEval. TrivialExists.
++ InvEval. TrivialExists.
++ apply eval_longofintu_base; auto.
 Qed.
 
 Theorem eval_longofint: unary_constructor_sound longofint Val.longofint.

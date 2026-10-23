@@ -1544,6 +1544,8 @@ Transparent destroyed_by_op.
 (* selection *)
   rewrite EQ1. exploit transl_sel_correct; eauto. intros (rs' & A & B & C).
   exists rs'; split. eexact A. eauto.
+(* zextb64 *)
+  destruct Archi.ptr64; try discriminate. ArgsInv. apply SAME; TranslOp.
 Qed.
 
 (** Translation of memory loads. *)
@@ -1615,6 +1617,23 @@ Proof.
   simpl in H2. inv H2.
   unfold Val.add; destruct Archi.ptr64; destruct (rs x0), v; simpl; auto;
   rewrite ? Int.add_zero, ? Ptrofs.add_zero; auto.
+(* zextb64_ld, zextw64_ld: the loaded value is already zero-extended *)
+  all: destruct chunk; try discriminate; ArgsInv;
+    match goal with H: Some _ = Some _ |- _ => inv H end;
+    match goal with H: Mem.loadv ?c _ ?A = Some ?v |- _ =>
+      assert (ZX: v = match c with Mint8unsigned => Val.zero_ext 8 v
+                                  | Mint16unsigned => Val.zero_ext 16 v | _ => v end)
+        by (destruct A; simpl in H; try discriminate;
+            destruct (zle _ _); try discriminate; exact (Mem.load_cast _ _ _ _ _ H));
+      simpl in ZX; rewrite <- ZX;
+      (econstructor; split;
+       [ apply exec_straight_one; [ cbn [exec_instr]; unfold exec_load_zx; rewrite H; reflexivity
+       | match goal with |- nextinstr_nf (?r # ?d <- ?w) PC = _ =>
+           transitivity (Val.offset_ptr ((r # d <- w) PC) Ptrofs.one);
+           [reflexivity | decEq; apply Pregmap.gso; auto with asmgen] end ]
+       | split; [ rewrite nextinstr_nf_inv by auto with asmgen; rewrite Pregmap.gss; auto
+                | intros; Simplifs ] ])
+    end.
 Qed.
 
 Lemma transl_store_correct:

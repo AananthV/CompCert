@@ -179,6 +179,10 @@ let print_operation reg pp = function
   | Oshllmask, [r1;r2] -> fprintf pp "%a <<l (%a & 63)" reg r1 reg r2
   | Oshrlmask, [r1;r2] -> fprintf pp "%a >>ls (%a & 63)" reg r1 reg r2
   | Oshrlumask, [r1;r2] -> fprintf pp "%a >>lu (%a & 63)" reg r1 reg r2
+  | Ozextb64, [r1] -> fprintf pp "long32unsigned(uint8(%a))" reg r1
+  | Ozextw64, [r1] -> fprintf pp "long32unsigned(uint16(%a))" reg r1
+  | Ozextb64_ld, [_;r2] -> fprintf pp "long32unsigned(uint8(%a))" reg r2
+  | Ozextw64_ld, [_;r2] -> fprintf pp "long32unsigned(uint16(%a))" reg r2
   | _ -> fprintf pp "<bad operator>"
 
 

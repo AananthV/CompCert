@@ -357,6 +357,7 @@ Definition two_address_op (op: operation) : bool :=
   | Osel c op => true
   | Oshlmask | Oshrmask | Oshrumask => true
   | Oshllmask | Oshrlmask | Oshrlumask => true
+  | Ozextb64 | Ozextw64 | Ozextb64_ld | Ozextw64_ld => false
   end.
 
 (* Constraints on constant propagation for builtins *)

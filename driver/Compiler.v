@@ -167,7 +167,7 @@ Definition transf_rtl_program (f: RTL.program) : res Asm.program :=
    @@ time "Branch tunneling" Tunneling.tunnel_program
   @@@ time "CFG linearization" Linearize.transf_program
    @@ time "Label cleanup" CleanupLabels.transf_program
-   @@ total_if Compopts.optim_loadop (time "Load-op fusion" Loadop.transf_program)
+   @@ total_if Loadop.enabled (time "Load-op fusion" Loadop.transf_program)
   @@@ partial_if Compopts.debug (time "Debugging info for local variables" Debugvar.transf_program)
   @@@ time "Mach generation" Stacking.transf_program
    @@ print print_Mach
@@ -293,7 +293,7 @@ Definition CompCert's_passes :=
   ::: mkpass Tunnelingproof.match_prog
   ::: mkpass Linearizeproof.match_prog
   ::: mkpass CleanupLabelsproof.match_prog
-  ::: mkpass (match_if Compopts.optim_loadop Loadopproof.match_prog)
+  ::: mkpass (match_if Loadop.enabled Loadopproof.match_prog)
   ::: mkpass (match_if Compopts.debug Debugvarproof.match_prog)
   ::: mkpass Stackingproof.match_prog
   ::: mkpass Asmgenproof.match_prog
@@ -349,7 +349,7 @@ Proof.
   set (p20 := Tunneling.tunnel_program p19) in *.
   destruct (Linearize.transf_program p20) as [p21|e] eqn:P21; simpl in T; try discriminate.
   set (p22 := CleanupLabels.transf_program p21) in *.
-  set (p22l := total_if optim_loadop Loadop.transf_program p22) in *.
+  set (p22l := total_if Loadop.enabled Loadop.transf_program p22) in *.
   destruct (partial_if debug Debugvar.transf_program p22l) as [p23|e] eqn:P23; simpl in T; try discriminate.
   destruct (Stacking.transf_program p23) as [p24|e] eqn:P24; simpl in T; try discriminate.
   unfold match_prog; simpl.

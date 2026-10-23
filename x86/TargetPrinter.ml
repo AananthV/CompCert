@@ -533,6 +533,14 @@ module Target(System: SYSTEM):TARGET =
           fprintf oc "	movswl	%a, %a\n" ireg16 r1 ireg32 rd
       | Pmovsw_rm(rd, a) ->
           fprintf oc "	movswl	%a, %a\n" addressing a ireg32 rd
+      | Pmovzbq_rm(rd, a) ->
+          fprintf oc "	movzbl	%a, %a\n" addressing a ireg32 rd
+      | Pmovzwq_rm(rd, a) ->
+          fprintf oc "	movzwl	%a, %a\n" addressing a ireg32 rd
+      | Pmovzbq_rr(rd, r1) ->
+          fprintf oc "	movzbl	%a, %a\n" ireg8 r1 ireg32 rd
+      | Pmovzwq_rr(rd, r1) ->
+          fprintf oc "	movzwl	%a, %a\n" ireg16 r1 ireg32 rd
       | Pmovzl_rr(rd, r1) ->
           fprintf oc "	movl	%a, %a\n" ireg32 r1 ireg32 rd
           (* movl sets the high 32 bits of the destination to zero *)

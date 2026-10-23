@@ -172,6 +172,10 @@ Definition eval_static_operation (op: operation) (vl: list aval): aval :=
   | Oshllmask, v1::v2::nil => shll v1 (and v2 (I (Int.repr 63)))
   | Oshrlmask, v1::v2::nil => shrl v1 (and v2 (I (Int.repr 63)))
   | Oshrlumask, v1::v2::nil => shrlu v1 (and v2 (I (Int.repr 63)))
+  | Ozextb64, v1::nil => longofintu (zero_ext 8 v1)
+  | Ozextw64, v1::nil => longofintu (zero_ext 16 v1)
+  | Ozextb64_ld, v1::v2::nil => longofintu (zero_ext 8 v2)
+  | Ozextw64_ld, v1::v2::nil => longofintu (zero_ext 16 v2)
   | _, _ => Vbot
   end.
 

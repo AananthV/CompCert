@@ -321,7 +321,7 @@ Inductive tr_spec: code -> code -> Prop :=
       tr_spec c tc ->
       fusable chunk addr t op args2 res (live fsig lm c) = true ->
       tr_spec (Lload chunk addr args t :: Lop op args2 res :: c)
-              (Lloadop op chunk addr args res :: tc).
+              (Lloadop (fused_op op chunk args2) chunk addr args res :: tc).
 
 Lemma tr_correct:
   forall c,
@@ -372,15 +372,24 @@ Qed.
 Lemma fusable_inv:
   forall chunk addr t op args2 res after,
   fusable chunk addr t op args2 res after = true ->
-  args2 = res :: t :: nil /\ t <> res /\ ~In res (destroyed_by_load chunk addr) /\ ~RegSet.In t after.
+  (args2 = res :: t :: nil /\ fused_op op chunk args2 = op
+   /\ t <> res /\ ~In res (destroyed_by_load chunk addr) /\ ~RegSet.In t after)
+  \/ (args2 = t :: nil /\ loadop_unary op chunk = Some (fused_op op chunk args2)
+      /\ (t = res \/ ~RegSet.In t after)).
 Proof.
-  unfold fusable; intros.
-  destruct args2 as [|rd [|t' [|]]]; try discriminate.
+  unfold fusable, fused_op; intros.
+  destruct args2 as [|rd [|t' [|]]]; [discriminate | | | discriminate].
+  { destruct (loadop_unary op chunk) as [op'|]; try discriminate.
+    destruct (mreg_eq rd t); try discriminate. subst rd. right. split; auto. split; auto.
+    destruct (mreg_eq t res). auto.
+    destruct (RegSet.mem t after) eqn:MEM; try discriminate. right.
+    intro IN. apply RegSet.mem_1 in IN. congruence. }
+  left. destruct (Compopts.optim_loadop tt); try discriminate.
   destruct (mreg_eq rd res); destruct (mreg_eq t' t); destruct (mreg_eq t res);
   destruct (loadop_candidate op chunk);
   destruct (In_dec mreg_eq res (destroyed_by_load chunk addr));
   destruct (RegSet.mem t after) eqn:MEM; simpl in H; try discriminate.
-  subst. split; auto. split; auto. split; auto.
+  subst. split; auto. split; auto. split; auto. split; auto.
   intro IN. apply RegSet.mem_1 in IN. congruence.
 Qed.
 
@@ -515,7 +524,7 @@ Inductive match_states: state -> state -> Prop :=
         (LS1: ls1 = Locmap.set (R t) v (undef_regs (destroyed_by_load chunk addr) ls0))
         (AG: agree (live (fn_sig f) (fun_lm f) (Lload chunk addr args t :: Lop op args2 res :: c2)) ls0 ls'),
       match_states (State s f sp (Lop op args2 res :: c2) ls1 m)
-                   (State ts (transf_function f) sp (Lloadop op chunk addr args res :: tc2) ls' m)
+                   (State ts (transf_function f) sp (Lloadop (fused_op op chunk args2) chunk addr args res :: tc2) ls' m)
   | match_states_call: forall s fd ls m ts ls'
         (STK: list_forall2 match_frames s ts)
         (AG: agree (call_live (funsig fd)) ls ls'),
@@ -585,7 +594,9 @@ Proof.
     econstructor; eauto.
     apply agree_set_remove. apply agree_undef_regs. eapply agree_add_regs; eauto.
 - (* op, completing a fused pair *)
-  exploit fusable_inv; eauto. intros (ARGS & NE & NDBL & DEAD). subst args.
+  exploit fusable_inv; eauto.
+  intros [(ARGS & FOP & NE & NDBL & DEAD) | (ARGS & UN & TRES)]; subst args; rewrite ?FOP.
+{
   cbn [live transfer] in AG.
   assert (RES: ls0 (R res) = ls' (R res)).
   { apply (agree_reg _ _ _ res AG). apply (proj2 (In_add_regs _ _ _)). right. apply RegSet.remove_2; auto.
@@ -619,6 +630,38 @@ Proof.
     apply (proj2 (In_add_regs _ _ _)). right. apply RegSet.remove_2; auto.
   + rewrite ! undef_regs_slot. rewrite Locmap.gso by exact I. rewrite undef_regs_slot.
     apply agree_slot with (s := live (fn_sig f) (fun_lm f) (Lload chunk addr args0 t :: Lop op (res :: t :: nil) res :: b)).
+    exact AG.
+}
+  (* a unary operation applied to the loaded value *)
+  exploit loadop_unary_correct; eauto. intros (SEM & DESTR).
+  cbn [live transfer] in AG.
+  assert (EA': eval_addressing tge sp addr (reglist ls' args0) = Some a).
+  { rewrite eval_addressing_preserved_2. rewrite <- (agree_add_regs_reglist _ _ _ _ AG). auto. }
+  simpl in H. rewrite Locmap.gss_reg in H.
+  left; econstructor; split.
+  apply plus_one. eapply exec_Lloadop. eexact EA'. eexact LD.
+  rewrite eval_operation_preserved_2. rewrite SEM. eexact H. eauto.
+  econstructor; eauto. rewrite DESTR.
+  apply agree_set_remove. intros l LIVE. destruct l as [r|sl ofs ty].
+  + simpl in LIVE. assert (NR: r <> res) by (intro; subst; eapply RegSet.remove_1; eauto).
+    apply RegSet.remove_3 in LIVE.
+    assert (NT: r <> t) by (intro; subst; destruct TRES; [congruence | contradiction]).
+    destruct (In_dec mreg_eq r (destroyed_by_op op)) as [IN1|NIN1].
+    rewrite (undef_regs_reg_same r (destroyed_by_op op)) by auto.
+    rewrite (undef_regs_reg_same r (_ ++ _)) by (apply in_or_app; auto). auto.
+    destruct (In_dec mreg_eq r (destroyed_by_load chunk addr)) as [IN2|NIN2].
+    rewrite (undef_regs_reg_same r (_ ++ _)) by (apply in_or_app; auto).
+    rewrite (undef_regs_reg_other r (destroyed_by_op op)) by auto.
+    rewrite Locmap.gso by (red; auto).
+    rewrite (undef_regs_reg_same r (destroyed_by_load chunk addr)) by auto. auto.
+    rewrite (undef_regs_reg_other r (destroyed_by_op op)) by auto.
+    rewrite (undef_regs_reg_other r (_ ++ _)) by (rewrite in_app_iff; tauto).
+    rewrite Locmap.gso by (red; auto).
+    rewrite (undef_regs_reg_other r (destroyed_by_load chunk addr)) by auto.
+    apply (agree_reg _ _ _ r AG). apply (proj2 (In_add_regs _ _ _)). right. apply RegSet.remove_2; auto.
+    apply (proj2 (In_add_regs _ _ _)). right. apply RegSet.remove_2; auto.
+  + rewrite ! undef_regs_slot. rewrite Locmap.gso by exact I. rewrite undef_regs_slot.
+    apply agree_slot with (s := live (fn_sig f) (fun_lm f) (Lload chunk addr args0 t :: Lop op (t :: nil) res :: b)).
     exact AG.
 - (* load *)
   inv TR.

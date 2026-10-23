@@ -58,6 +58,9 @@ Parameter optim_loadop: unit -> bool.
     variable shifts, which the x86 hardware performs. *)
 Parameter optim_shiftmask: unit -> bool.
 
+(** Flag -fzext-load.  For 8/16-bit zero extensions with a 64-bit result. *)
+Parameter optim_zextload: unit -> bool.
+
 (** Flag -fredundancy.  For dead code elimination. *)
 Parameter optim_redundancy: unit -> bool.
 

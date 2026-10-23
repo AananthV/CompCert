@@ -55,7 +55,7 @@ Definition op_safe (op: operation) (n: nat) : bool :=
   | (Ocast8signed | Ocast8unsigned | Ocast16signed | Ocast16unsigned
      | Oneg | Omulimm _ | Oandimm _ | Oorimm _ | Oxorimm _ | Onot
      | Oshlimm _ | Oshrimm _ | Oshruimm _ | Ororimm _
-     | Olowlong | Ohighlong | Ocast32signed | Ocast32unsigned
+     | Olowlong | Ohighlong | Ocast32signed | Ocast32unsigned | Ozextb64 | Ozextw64
      | Onegl | Oaddlimm _ | Omullimm _ | Oandlimm _ | Oorlimm _
      | Oxorlimm _ | Onotl | Oshllimm _ | Oshrlimm _ | Oshrluimm _
      | Ororlimm _
