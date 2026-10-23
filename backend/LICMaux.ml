@@ -29,9 +29,7 @@ let defs_all = function
    moves is pointless. *)
 
 let worth_hoisting op =
-  match op with
-  | Omove | Ointconst _ | Olongconst _ | Ofloatconst _ | Osingleconst _ -> false
-  | _ -> true
+  not (LICMop.is_const_op op)
 
 let hoistable op args =
   worth_hoisting op

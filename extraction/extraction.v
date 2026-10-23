@@ -176,6 +176,7 @@ Separate Extraction
    Conventions1.dummy_int_reg Conventions1.dummy_float_reg
    Conventions1.allocatable_registers
    RTL.instr_defs RTL.instr_uses
+   LICMop.is_const_op
    IVop.mk_sext IVop.mk_addlimm IVop.mk_mullimm IVop.mk_addl
    IVop.mk_cmpl IVop.mk_cmplimm IVop.shift_addr IVop.rebase_addr IVop.addr_base_index
    IVdomain.transf_instr IVdomain.transfer IVdomain.transfer_cond

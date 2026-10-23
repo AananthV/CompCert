@@ -15,6 +15,14 @@
 
 Require Import Coqlib AST Integers Values Memory Globalenvs Op.
 
+(** Moves and constants are not worth hoisting (used by the LICM heuristic). *)
+
+Definition is_const_op (op: operation) : bool :=
+  match op with
+  | Omove | Ointconst _ | Olongconst _ | Ofloatconst _ | Osingleconst _ => true
+  | _ => false
+  end.
+
 Definition op_safe (op: operation) (n: nat) : bool := false.
 
 Lemma op_safe_correct:
