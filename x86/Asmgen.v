@@ -678,6 +678,13 @@ Definition transl_op
       assertion (mreg_eq a1 res);
       assertion (mreg_eq a2 CX);
       do r <- ireg_of res; OK (Pshrq_rcl r :: k)
+(* 32-bit zero extensions also zero the high 32 bits of the destination. *)
+  | Ozextb64, a1 :: nil =>
+      if Archi.ptr64
+      then do r1 <- ireg_of a1; do r <- ireg_of res; OK (Pmovzbq_rr r r1 :: k)
+      else Error(msg "Asmgen.transl_op")
+  | Ozextw64, a1 :: nil =>
+      do r1 <- ireg_of a1; do r <- ireg_of res; OK (Pmovzwq_rr r r1 :: k)
   | _, _ =>
       Error(msg "Asmgen.transl_op")
   end.
@@ -728,6 +735,8 @@ Definition transl_loadop (op: operation) (chunk: memory_chunk)
   | Olea (Aindexed2 n), Mint32 =>
       if zeq n 0 then do r <- ireg_of dst; OK (Paddl_rm r am :: k)
       else Error (msg "Asmgen.transl_loadop")
+  | Ozextb64_ld, Mint8unsigned => do r <- ireg_of dst; OK (Pmovzbq_rm r am :: k)
+  | Ozextw64_ld, Mint16unsigned => do r <- ireg_of dst; OK (Pmovzwq_rm r am :: k)
   | _, _ => Error (msg "Asmgen.transl_loadop")
   end.
 

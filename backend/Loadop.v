@@ -18,6 +18,17 @@
   is turned into a single [Lloadop op chunk addr args rd] instruction,
   provided that [t] is dead after the operation.  On x86 this becomes an
   arithmetic instruction with a memory operand, e.g. [addsd mem, %xmm0].
+  This is enabled by [-fload-op].
+
+  Likewise, with [-fzext-load], a load followed by a unary operation
+  that can take its argument from memory ([LoadopOp.loadop_unary]),
+<<
+      t = chunk[addr(args)]
+      rd = op(t)
+>>
+  is turned into [Lloadop op' chunk addr args rd], provided that [t] is
+  [rd] or is dead after the operation.  On x86 this is used for loads
+  zero-extended to 64 bits, e.g. [movzbl mem, %eax] with a 64-bit result.
 
   Deadness is decided by a backward liveness analysis over the Linear
   code.  The live sets at labels are computed by a bounded fixpoint
@@ -26,7 +37,7 @@
   conservative assumption "every register is live at every label" is
   used instead, which is always valid. *)
 
-Require Import Coqlib Maps.
+Require Import Coqlib Maps Compopts.
 Require Import AST Integers Values Memory Globalenvs.
 Require Import Op Locations Conventions Linear.
 Require Import Bounds LoadopOp.
@@ -116,11 +127,25 @@ Definition fusable (chunk: memory_chunk) (addr: addressing) (t: mreg)
                    (after: RegSet.t) : bool :=
   match args2 with
   | rd :: t' :: nil =>
-      mreg_eq rd res && mreg_eq t' t && negb (mreg_eq t res)
+      Compopts.optim_loadop tt
+      && mreg_eq rd res && mreg_eq t' t && negb (mreg_eq t res)
       && loadop_candidate op chunk
       && negb (In_dec mreg_eq res (destroyed_by_load chunk addr))
       && negb (RegSet.mem t after)
+  | t' :: nil =>
+      match loadop_unary op chunk with
+      | Some _ => mreg_eq t' t && (mreg_eq t res || negb (RegSet.mem t after))
+      | None => false
+      end
   | _ => false
+  end.
+
+(** The operation of the fused instruction. *)
+
+Definition fused_op (op: operation) (chunk: memory_chunk) (args2: list mreg) : operation :=
+  match args2, loadop_unary op chunk with
+  | _ :: nil, Some op' => op'
+  | _, _ => op
   end.
 
 (** [tr lm c] returns the transformed code, the registers live at the
@@ -136,7 +161,7 @@ Fixpoint tr (lm: labelmap) (c: code) {struct c} : code * RegSet.t * RegSet.t * b
       match i, c1, tc1 with
       | Lload chunk addr args t, Lop op args2 res :: _, Lop _ _ _ :: tc2 =>
           if fusable chunk addr t op args2 res s1'
-          then (Lloadop op chunk addr args res :: tc2, transfer lm i s1, s1, ok1)
+          then (Lloadop (fused_op op chunk args2) chunk addr args res :: tc2, transfer lm i s1, s1, ok1)
           else dflt
       | _, _, _ => dflt
       end
@@ -202,3 +227,7 @@ Definition transf_fundef (f: fundef) : fundef :=
 
 Definition transf_program (p: program) : program :=
   transform_program transf_fundef p.
+
+(** The pass is run if one of its two flags is set. *)
+
+Definition enabled (u: unit) : bool := Compopts.optim_loadop u || Compopts.optim_zextload u.

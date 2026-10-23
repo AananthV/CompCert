@@ -182,7 +182,14 @@ Inductive operation : Type :=
   | Oshrumask                (**r [rd = r1 >> (r2 & 31)] (unsigned) *)
   | Oshllmask                (**r [rd = r1 << (r2 & 63)] *)
   | Oshrlmask                (**r [rd = r1 >> (r2 & 63)] (signed) *)
-  | Oshrlumask.              (**r [rd = r1 >> (r2 & 63)] (unsigned) *)
+  | Oshrlumask               (**r [rd = r1 >> (r2 & 63)] (unsigned) *)
+(*c Zero extensions of 8/16-bit values to 64 bits: *)
+  | Ozextb64                 (**r [rd] is 64-bit zero extension of [r1 & 0xff] *)
+  | Ozextw64                 (**r [rd] is 64-bit zero extension of [r1 & 0xffff] *)
+  | Ozextb64_ld              (**r [rd] is 64-bit zero extension of [r2 & 0xff]; [r1] is ignored *)
+  | Ozextw64_ld.             (**r [rd] is 64-bit zero extension of [r2 & 0xffff]; [r1] is ignored *)
+(** The [_ld] forms are only used in [Lloadop] instructions: they are
+  [Ozextb64] and [Ozextw64] applied to a value loaded from memory. *)
 
 (** Comparison functions (used in modules [CSE] and [Allocation]). *)
 
@@ -460,6 +467,10 @@ Definition eval_operation
   | Oshllmask, v1::v2::nil => Some (Val.shll v1 (Val.and v2 (Vint (Int.repr 63))))
   | Oshrlmask, v1::v2::nil => Some (Val.shrl v1 (Val.and v2 (Vint (Int.repr 63))))
   | Oshrlumask, v1::v2::nil => Some (Val.shrlu v1 (Val.and v2 (Vint (Int.repr 63))))
+  | Ozextb64, v1::nil => Some (Val.longofintu (Val.zero_ext 8 v1))
+  | Ozextw64, v1::nil => Some (Val.longofintu (Val.zero_ext 16 v1))
+  | Ozextb64_ld, v1::v2::nil => Some (Val.longofintu (Val.zero_ext 8 v2))
+  | Ozextw64_ld, v1::v2::nil => Some (Val.longofintu (Val.zero_ext 16 v2))
   | _, _ => None
   end.
 
@@ -639,6 +650,8 @@ Definition type_of_operation (op: operation) : list typ * typ :=
   | Osel c ty => (ty :: ty :: type_of_condition c, ty)
   | Oshlmask | Oshrmask | Oshrumask => (Tint :: Tint :: nil, Tint)
   | Oshllmask | Oshrlmask | Oshrlumask => (Tlong :: Tint :: nil, Tlong)
+  | Ozextb64 | Ozextw64 => (Tint :: nil, Tlong)
+  | Ozextb64_ld | Ozextw64_ld => (Tlong :: Tint :: nil, Tlong)
   end.
 
 (** Weak type soundness results for [eval_operation]:
@@ -802,8 +815,10 @@ Proof with (try exact I; try reflexivity).
   destruct v0; simpl in H0; inv H0...
   destruct (eval_condition cond vl m); simpl... destruct b...
   unfold Val.select. destruct (eval_condition c vl m). apply Val.normalize_type. exact I.
-  all: destruct v0; destruct v1; simpl; trivial;
-       match goal with |- context [if ?c then _ else _] => destruct c end...
+  all: try (destruct v0; destruct v1; simpl; trivial;
+       match goal with |- context [if ?c then _ else _] => destruct c end;
+       try exact I; try reflexivity; fail).
+  all: try (destruct v0; simpl; trivial; fail); destruct v1; simpl; trivial.
 Qed.
 
 End SOUNDNESS.
@@ -1386,8 +1401,9 @@ Proof.
   apply Val.select_inject; auto.  
   destruct (eval_condition c vl1 m1) eqn:?; auto.
   right; symmetry; eapply eval_condition_inj; eauto.
-  all: inv H4; inv H2; simpl; auto;
-       match goal with |- context [if ?c then _ else _] => destruct c end; auto.
+  all: try (inv H4; inv H2; simpl; auto;
+       match goal with |- context [if ?c then _ else _] => destruct c end; auto; fail).
+  all: repeat match goal with H: Val.inject _ _ _ |- _ => inv H end; simpl; auto.
 Qed.
 
 End EVAL_COMPAT.

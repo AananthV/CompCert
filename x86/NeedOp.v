@@ -112,6 +112,8 @@ Definition needs_of_operation (op: operation) (nv: nval): list nval :=
   | Osel c ty => nv :: nv :: needs_of_condition c
   | Oshlmask | Oshrmask | Oshrumask
   | Oshllmask | Oshrlmask | Oshrlumask => op2 (default nv)
+  | Ozextb64 | Ozextw64 => op1 (default nv)
+  | Ozextb64_ld | Ozextw64_ld => op2 (default nv)
   end.
 
 Definition operation_is_redundant (op: operation) (nv: nval): bool :=

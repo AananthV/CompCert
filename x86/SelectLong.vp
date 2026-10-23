@@ -60,11 +60,25 @@ Nondetfunction longofintu_base (e: expr) :=
   | _ => Eop Ocast32unsigned (e ::: Enil)
   end.
 
+(** With [-fzext-load], the zero extension of an 8/16-bit load or of an
+  8/16-bit zero extension is done by a single [movzbl]/[movzwl], which
+  also zeroes the high 32 bits.  For loads, the [Loadop] pass then fuses
+  the load and the extension into one instruction. *)
+
+Nondetfunction longofintu_zext (e: expr) :=
+  match e with
+  | Eload Mint8unsigned addr args => Eop Ozextb64 (e:::Enil)
+  | Eload Mint16unsigned addr args => Eop Ozextw64 (e:::Enil)
+  | Eop Ocast8unsigned (t:::Enil) => Eop Ozextb64 (t:::Enil)
+  | Eop Ocast16unsigned (t:::Enil) => Eop Ozextw64 (t:::Enil)
+  | _ => longofintu_base e
+  end.
+
 Definition longofintu (e: expr) :=
   if Archi.splitlong then SplitLong.longofintu e else
   match is_intconst e with
   | Some n => longconst (Int64.repr (Int.unsigned n))
-  | None =>  longofintu_base e
+  | None => if Compopts.optim_zextload tt then longofintu_zext e else longofintu_base e
   end.
 
 Nondetfunction notl (e: expr) :=

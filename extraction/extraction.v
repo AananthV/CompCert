@@ -116,6 +116,8 @@ Extract Constant Compopts.optim_loadop =>
   "fun _ -> !Clflags.option_floadop".
 Extract Constant Compopts.optim_shiftmask =>
   "fun _ -> !Clflags.option_fshiftmask".
+Extract Constant Compopts.optim_zextload =>
+  "fun _ -> !Clflags.option_fzextload".
 Extract Constant Compopts.optim_redundancy =>
   "fun _ -> !Clflags.option_fredundancy".
 Extract Constant Compopts.thumb =>
