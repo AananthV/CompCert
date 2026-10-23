@@ -32,19 +32,20 @@ Changes, each fully proved:
 | new pass `Loadfwd`: load forwarding across join points | `-floadfwd` | spectral 0.60x |
 | new pass `IVwiden`: induction-variable widening and strength reduction, validated (#4) | `-fiv-widen` | gemm 0.74x, sha1 0.87x, syrk 0.87x |
 | new passes `Looprot` + `LICM`: validated loop rotation and loop-invariant code motion, including chains of dependent operations (#16) | `-floop-rotate`, `-flicm` | aes, sha1, fannkuch; gemm 0.72x, syrk 0.73x, floyd-warshall 0.74x |
-
 | new pass `Loadop`: x86 arithmetic with memory operands (#5; **trusted-base change**, see [TRUSTED_BASE.md](TRUSTED_BASE.md)) | `-fload-op` (off by default) | gemm 0.91x, nbody 0.96x, spectral 0.97x |
-
 | x86 shift-count masking in the Asm model, plus masked-shift selection (#11; **trusted-base change**) | `-fshift-mask` (off by default) | nsievebits 0.94x |
 | new pass `Tailacc` (accumulator tail recursion) + bounded recursive inlining (#8) | `-ftail-acc`, `-finline-recursive-depth N` | fib 0.54x (narrow: fib only) |
-
 | `sqrt`/`fabs` calls become exact builtins (#12 phase 1; **trusted-base change**) | `-ftrust-libm` (off by default) | nbody 0.83x |
+| zero-extending 8/16-bit loads with 64-bit results (#25; **trusted-base change**) | `-fzext-load` (off by default) | siphash24 0.94x |
 
 Verification:
 
-- No new axioms. The only new entries in `Print Assumptions` are three flags
-  and two validated oracles (`results/`).
-- `make proof` succeeds on x86_64, x86_32, aarch64, arm, powerpc and rv64.
+- No new axioms. The only new entries in `Print Assumptions` are command-line
+  flags and validated oracles (`results/axioms-faster-compcert.txt`).
+- Every change to the trusted base was approved by the owner and is recorded,
+  with its validation, in [TRUSTED_BASE.md](TRUSTED_BASE.md).
+- `make proof` and `make ccomp` succeed on x86_64, x86_32, aarch64, arm, powerpc
+  and rv64.
 - The regression suite (`make -C test all test`) passes.
 
 Known gaps and next steps are in [REPORT.md, section 5](REPORT.md#5-what-remains-and-what-it-would-take).

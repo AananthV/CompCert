@@ -1236,3 +1236,29 @@ static, and address never taken. The trusted assumption is that glibc's
 
 13 files change code. Without the `sqrtsd` false-dependency fix from round 1,
 this change would have made nbody *slower* (§1.3).
+
+---
+
+## 20. Fourth trusted-base change: zero-extending loads with 64-bit results (issue #25)
+
+**What it adds.** Four x86 instructions, `movzbl`/`movzwl` viewed as producing
+a zero-extended 64-bit result, in memory and register forms (ledger entry 6).
+With `-fzext-load` (off by default):
+- selection turns `(unsigned long)` of an 8/16-bit unsigned load or cast into
+  new `Ozextb64`/`Ozextw64` operators;
+- the existing Linear `Loadop` pass fuses the load with the extension.
+
+All of this is proved.
+
+**Results.**
+- Flag off: generated code unchanged.
+- With the flag: **siphash24 −6%** (all 7 redundant `movl %r,%r` per word are
+  gone; my re-run gave 0.163 → 0.153 s); aes unchanged.
+- The hardware differential test gives 0 mismatches.
+- The regression suite passes by default and with all four opt-in flags
+  (`-fload-op -fshift-mask -ftrust-libm -fzext-load`) together.
+- Proofs and `ccomp` build on all six targets.
+
+The branch was rebased onto master by me, with the owner's permission (the
+implementing agent's own rebase attempt was blocked by the permission system).
+The two conflicts were adjacent flag declarations.

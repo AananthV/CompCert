@@ -169,3 +169,35 @@ rewritten code.
 **Revert.** Remove `trusted_libm` / `trusted_libm_calls` and the call case in
 `C2C.ml`, and the flag.
 
+## 6. Zero-extending 8/16-bit loads and moves with 64-bit results (#25)
+
+- **Approved:** by the owner, 2026-10-22, for exactly the proposal on #25.
+- **Merged in:** "x86: opt-in -fzext-load, zero-extending 8/16-bit loads with 64-bit results".
+- **Flag:** `-fzext-load`, off by default.
+
+**Assumption.** There are four new `x86/Asm.v` instructions:
+- `Pmovzbq_rm rd a` and `Pmovzwq_rm rd a` = `exec_load_zx Mint8unsigned/Mint16unsigned`,
+  i.e. `rs#rd <- Val.longofintu v` after the load, with flags undefined;
+- `Pmovzbq_rr rd r1` and `Pmovzwq_rr rd r1` =
+  `rs#rd <- Val.longofintu (Val.zero_ext 8/16 rs#r1)`.
+
+They are printed exactly like the existing `Pmovzb_rm`/`Pmovzw_rm`/`Pmovzb_rr`/`Pmovzw_rr`
+(`movzbl`/`movzwl` into the 32-bit register).
+
+**Justification.**
+- Intel SDM Vol. 2, MOVZX: zero-extends the source into the 32-bit destination.
+- Intel SDM Vol. 1 §3.4.1.1: a 32-bit destination is zero-extended to 64 bits.
+
+The memory read is modelled like the existing `Pmovzb_rm`/`Pmovzw_rm`.
+
+**Validation.** `harness/asm_difftest/` group `zxload`, comparing the full 64-bit
+destination against the extracted semantics:
+- coverage: every byte or halfword value, garbage in the upper bits of the
+  source and the old destination, and 6 addressing modes at random addresses;
+- results: 0 mismatches, and the upper 32 bits were zeroed in 100% of tests;
+- undefined cases: only misaligned 16-bit addresses, which the model treats as
+  invalid (`Stuck`), exactly as for the existing `Pmovzw_rm`.
+
+**Revert.** Remove the four constructors, `exec_load_zx`, the printer cases, the
+`Ozextb64`/`Ozextw64` operators, the selection rules, and the flag.
+
