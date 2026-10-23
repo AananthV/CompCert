@@ -81,6 +81,36 @@ Definition run_regs (i: instruction) (inits: list (preg * val)) (r: preg) : opti
   | Stuck => None
   end.
 
+(** [run_mem i inits base baseoff bytes r] is like [run_regs], with a
+  memory made of one block of [bufsize] bytes, which holds the bytes
+  [bytes] (a list of (offset, value)) and is pointed to by [base] at
+  offset [baseoff]. *)
+
+Definition bufsize : Z := 131072.
+
+Fixpoint store_bytes (m: mem) (b: block) (l: list (Z * Z)) : option mem :=
+  match l with
+  | nil => Some m
+  | (ofs, v) :: l' =>
+      match Mem.store Mint8unsigned m b ofs (Vint (Int.repr v)) with
+      | Some m' => store_bytes m' b l'
+      | None => None
+      end
+  end.
+
+Definition run_mem (i: instruction) (inits: list (preg * val)) (base: preg) (baseoff: Z)
+                   (bytes: list (Z * Z)) (r: preg) : option val :=
+  let (m1, b) := Mem.alloc Mem.empty 0 bufsize in
+  match store_bytes m1 b bytes with
+  | None => None
+  | Some m2 =>
+      let rs := fold_left (fun rs pv => rs # (fst pv) <- (snd pv)) inits (Pregmap.init Vundef) in
+      match exec_instr dummy_ge dummy_fn i (rs # base <- (Vptr b (Ptrofs.repr baseoff))) m2 with
+      | Next rs' _ => Some (rs' r)
+      | Stuck => None
+      end
+  end.
+
 (** [sqrtsd] is produced by [Asmexpand] from the builtin [__builtin_fsqrt]
   ([Psqrtsd] itself is [Stuck] in [exec_instr], as are all instructions
   produced by the expander).  Its semantics is that of the builtin. *)

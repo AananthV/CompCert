@@ -2,13 +2,13 @@
 # Differential test of the x86 Asm.v semantics against the hardware.
 # See README.md.
 # usage: run.sh [COMPCERT_TREE] [N_RANDOM_PER_INSTR] [SEED] [GROUPS]
-#   GROUPS: comma-separated subset of loadop,zx,cvt,shift (default: all)
+#   GROUPS: comma-separated subset of loadop,zx,cvt,shift,zxload (default: all)
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 TREE=$(cd "${1:-$HERE/../../..}" && pwd)
 N=${2:-20000}
 SEED=${3:-0x9e3779b97f4a7c15}
-GROUPS_=${4:-loadop,zx,cvt,shift}
+GROUPS_=${4:-loadop,zx,cvt,shift,zxload}
 OUT=${ASM_DIFFTEST_OUT:-$(mktemp -d)}
 mkdir -p "$OUT"
 cp "$HERE"/Semantics.v "$HERE"/Extract.v "$HERE"/check.ml "$HERE"/hw.c "$HERE"/hw.s \
@@ -32,8 +32,8 @@ if [[ ,$GROUPS_, == *,loadop,* ]]; then
   ./hw "$N" "$SEED" > hw.txt
   ./check < hw.txt || status=1
 fi
-# Register-only instructions (#10: zx, cvt; #11: shift).
-REGS=$(echo "$GROUPS_" | tr ',' '\n' | grep -E '^(zx|cvt|shift)$' | paste -sd, -)
+# Register and memory instructions (#10: zx, cvt; #11: shift; #25: zxload).
+REGS=$(echo "$GROUPS_" | tr ',' '\n' | grep -E '^(zx|cvt|shift|zxload)$' | paste -sd, -)
 if [ -n "$REGS" ]; then
   echo "== $REGS"
   python3 -I "$HERE"/gen_tests.py "$REGS" "$SEED" > regs_tests.s
