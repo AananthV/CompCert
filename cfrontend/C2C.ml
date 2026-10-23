@@ -154,6 +154,12 @@ let atom_literal a =
 
 let comp_env : composite_env ref = ref Maps.PTree.empty
 
+(** Under [-ftrust-libm], the calls to [sqrt] and [fabs] that become calls to
+    builtins: the identifier of the libm function, and the identifier and type
+    of the builtin that replaces it.  Computed by [trusted_libm_calls]. *)
+
+let trusted_libm : (C.ident * (C.ident * C.typ)) list ref = ref []
+
 (** Hooks -- overridden in machine-dependent CPragmas module *)
 
 let process_pragma_hook = ref (fun (_: string) -> false)
@@ -1003,6 +1009,12 @@ let rec convertExpr env e =
       ewrap (Ctyping.ecast (convertTyp env (C.TInt(C.ILong, [])))
                            (convertExpr env arg1))
 
+  | C.ECall({edesc = C.EVar id}, args)
+    when List.mem_assoc id !trusted_libm ->
+      let (id', ty') = List.assoc id !trusted_libm in
+      convertExpr env
+        {e with edesc = C.ECall({edesc = C.EVar id'; etyp = ty'}, args)}
+
   | C.ECall({edesc = C.EVar {name = "printf"}}, args)
     when !Clflags.option_interp ->
       let targs = convertTypArgs env [] args
@@ -1500,6 +1512,79 @@ let cleanupGlobals p =
             clean defs (g :: accu) gl
   in clean IdentSet.empty [] (List.rev p)
 
+(** Under [-ftrust-libm], calls to the libm functions [sqrt] and [fabs] are
+    replaced by calls to the builtins [__builtin_fsqrt] and [__builtin_fabs].
+    This assumes that the libm functions compute the IEEE 754 square root and
+    absolute value, and ignores [errno], like GCC's [-fno-math-errno].
+    A function is replaced only if it is declared with exactly the C99
+    prototype [double f(double)], is not static, is not defined in the
+    program, and is only used as the callee of direct calls (its address is
+    never taken). *)
+
+let libm_builtins = [ "sqrt", "__builtin_fsqrt"; "fabs", "__builtin_fabs" ]
+
+let trusted_libm_calls env p =
+  (* Identifiers used other than as the callee of a direct call *)
+  let addr = ref IdentSet.empty in
+  let rec exp e =
+    match e.edesc with
+    | C.EConst _ | C.ESizeof _ | C.EAlignof _ -> ()
+    | C.EVar id -> addr := IdentSet.add id !addr
+    | C.EUnop(_, e1) | C.ECast(_, e1) -> exp e1
+    | C.EBinop(_, e1, e2, _) -> exp e1; exp e2
+    | C.EConditional(e1, e2, e3) -> exp e1; exp e2; exp e3
+    | C.ECompound(_, i) -> init i
+    | C.ECall({edesc = C.EVar _}, args) -> List.iter exp args
+    | C.ECall(fn, args) -> exp fn; List.iter exp args
+  and init = function
+    | C.Init_single e -> exp e
+    | C.Init_array il -> List.iter init il
+    | C.Init_struct(_, fl) -> List.iter (fun (_, i) -> init i) fl
+    | C.Init_union(_, _, i) -> init i
+  and decl (_, _, _, i) = Option.iter init i
+  and stmt s =
+    match s.sdesc with
+    | C.Sskip | C.Sbreak | C.Scontinue | C.Sgoto _ -> ()
+    | C.Sdo e -> exp e
+    | C.Sseq(s1, s2) -> stmt s1; stmt s2
+    | C.Sif(e, s1, s2) -> exp e; stmt s1; stmt s2
+    | C.Swhile(e, s1) | C.Sdowhile(s1, e) | C.Sswitch(e, s1) -> exp e; stmt s1
+    | C.Sfor(s1, e, s2, s3) -> stmt s1; exp e; stmt s2; stmt s3
+    | C.Slabeled(C.Scase(e, _), s1) -> exp e; stmt s1
+    | C.Slabeled(_, s1) -> stmt s1
+    | C.Sreturn eo -> Option.iter exp eo
+    | C.Sblock sl -> List.iter stmt sl
+    | C.Sdecl d -> decl d
+    | C.Sasm(_, _, outs, ins, _) ->
+        List.iter (fun (_, _, e) -> exp e) outs;
+        List.iter (fun (_, _, e) -> exp e) ins in
+  List.iter (fun g ->
+      match g.gdesc with
+      | C.Gdecl d -> decl d
+      | C.Gfundef fd -> List.iter decl fd.fd_locals; stmt fd.fd_body
+      | _ -> ()) p;
+  (* The global declarations of [name] *)
+  let globals name =
+    List.filter_map (fun g ->
+        match g.gdesc with
+        | C.Gdecl((_, id, _, _) as d) when id.name = name -> Some (Some d)
+        | C.Gfundef fd when fd.fd_name.name = name -> Some None
+        | _ -> None) p in
+  let is_double ty =
+    match Cutil.unroll env ty with C.TFloat(C.FDouble, []) -> true | _ -> false in
+  List.filter_map (fun (name, bname) ->
+      match globals name, globals bname with
+      | [Some(sto, id, ty, None)], [Some(_, bid, bty, _)]
+        when sto <> C.Storage_static
+          && not (IdentSet.mem id !addr) ->
+          begin match Cutil.unroll env ty with
+          | C.TFun(tres, Some [(_, targ)], false, [])
+            when is_double tres && is_double targ ->
+              Some (id, (bid, bty))
+          | _ -> None
+          end
+      | _ -> None) libm_builtins
+
 (** Extract the list of public (non-static) names *)
 
 let public_globals gl =
@@ -1560,10 +1645,13 @@ let convertProgram p =
                        (string_of_errmsg msg)
     | Errors.OK ce ->
         comp_env := ce;
+        trusted_libm :=
+          if !Clflags.option_ftrust_libm then trusted_libm_calls env p else [];
         let gl1 = convertGlobdecls env [] p in
         let gl2 = globals_for_strings gl1 in
         let gl3 = add_helper_functions gl2 in
         comp_env := Maps.PTree.empty;
+        trusted_libm := [];
         let p' =
           { prog_defs = gl3;
             prog_public = public_globals gl3;
