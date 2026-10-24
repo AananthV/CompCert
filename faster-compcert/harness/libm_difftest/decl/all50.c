@@ -1,0 +1,54 @@
+/* EXPECT on=50 off=100 */
+/* All 50 functions, each called twice on the same arguments. */
+#include <math.h>
+double r; float s;
+void t_floor(double x) { r = floor(x) + floor(x); }
+void t_ceil(double x) { r = ceil(x) + ceil(x); }
+void t_trunc(double x) { r = trunc(x) + trunc(x); }
+void t_round(double x) { r = round(x) + round(x); }
+void t_sin(double x) { r = sin(x) + sin(x); }
+void t_cos(double x) { r = cos(x) + cos(x); }
+void t_tan(double x) { r = tan(x) + tan(x); }
+void t_asin(double x) { r = asin(x) + asin(x); }
+void t_acos(double x) { r = acos(x) + acos(x); }
+void t_atan(double x) { r = atan(x) + atan(x); }
+void t_sinh(double x) { r = sinh(x) + sinh(x); }
+void t_cosh(double x) { r = cosh(x) + cosh(x); }
+void t_tanh(double x) { r = tanh(x) + tanh(x); }
+void t_exp(double x) { r = exp(x) + exp(x); }
+void t_exp2(double x) { r = exp2(x) + exp2(x); }
+void t_expm1(double x) { r = expm1(x) + expm1(x); }
+void t_log(double x) { r = log(x) + log(x); }
+void t_log2(double x) { r = log2(x) + log2(x); }
+void t_log10(double x) { r = log10(x) + log10(x); }
+void t_log1p(double x) { r = log1p(x) + log1p(x); }
+void t_cbrt(double x) { r = cbrt(x) + cbrt(x); }
+void t_pow(double x, double y) { r = pow(x, y) + pow(x, y); }
+void t_atan2(double x, double y) { r = atan2(x, y) + atan2(x, y); }
+void t_fmod(double x, double y) { r = fmod(x, y) + fmod(x, y); }
+void t_hypot(double x, double y) { r = hypot(x, y) + hypot(x, y); }
+void t_floorf(float x) { s = floorf(x) + floorf(x); }
+void t_ceilf(float x) { s = ceilf(x) + ceilf(x); }
+void t_truncf(float x) { s = truncf(x) + truncf(x); }
+void t_roundf(float x) { s = roundf(x) + roundf(x); }
+void t_sinf(float x) { s = sinf(x) + sinf(x); }
+void t_cosf(float x) { s = cosf(x) + cosf(x); }
+void t_tanf(float x) { s = tanf(x) + tanf(x); }
+void t_asinf(float x) { s = asinf(x) + asinf(x); }
+void t_acosf(float x) { s = acosf(x) + acosf(x); }
+void t_atanf(float x) { s = atanf(x) + atanf(x); }
+void t_sinhf(float x) { s = sinhf(x) + sinhf(x); }
+void t_coshf(float x) { s = coshf(x) + coshf(x); }
+void t_tanhf(float x) { s = tanhf(x) + tanhf(x); }
+void t_expf(float x) { s = expf(x) + expf(x); }
+void t_exp2f(float x) { s = exp2f(x) + exp2f(x); }
+void t_expm1f(float x) { s = expm1f(x) + expm1f(x); }
+void t_logf(float x) { s = logf(x) + logf(x); }
+void t_log2f(float x) { s = log2f(x) + log2f(x); }
+void t_log10f(float x) { s = log10f(x) + log10f(x); }
+void t_log1pf(float x) { s = log1pf(x) + log1pf(x); }
+void t_cbrtf(float x) { s = cbrtf(x) + cbrtf(x); }
+void t_powf(float x, float y) { s = powf(x, y) + powf(x, y); }
+void t_atan2f(float x, float y) { s = atan2f(x, y) + atan2f(x, y); }
+void t_fmodf(float x, float y) { s = fmodf(x, y) + fmodf(x, y); }
+void t_hypotf(float x, float y) { s = hypotf(x, y) + hypotf(x, y); }

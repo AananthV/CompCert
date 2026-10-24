@@ -248,3 +248,57 @@ destination against the extracted semantics:
   added premises, then re-prove the fallout.
 - Remove the CSE hook and the flag.
 
+## 8. Pure libm functions under `-ftrust-libm` (#12, phase 2)
+
+- **Approved:** by the owner, 2026-10-24, for all 50 functions, exactly as
+  proposed on #12.
+- **Merged in:** "-ftrust-libm: treat 50 libm functions as pure runtime functions".
+- **Flag:** `-ftrust-libm`, off by default; ignored under `-interp`.
+
+**Assumption.**
+- **`common/Builtins0.v`:** four uninterpreted Parameters, `libm_d1`,
+  `libm_d2`, `libm_s1` and `libm_s2`, indexed by the function name. They are
+  used as the semantics of new built-ins `BI_libm_* name`, through the total
+  wrappers `mkbuiltin_n1t`/`n2t`. The listed functions are floor, ceil,
+  trunc, round, sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, exp,
+  exp2, expm1, log, log2, log10, log1p, cbrt, pow, atan2, fmod, hypot, and
+  their `f` versions.
+- **`cfrontend/C2C.ml`:** under the flag, non-static declarations of these
+  names with exactly their C99 prototype become `EF_runtime`.
+- **`extraction/extraction.v`:** the Parameters are realised as `failwith`.
+  They are never evaluated by the compiler.
+
+We trust that glibc's implementations:
+- are deterministic functions of their arguments within one process;
+- have no memory effect other than `errno`, and no observable output;
+- always return.
+
+**`errno` policy:** GCC's `-fno-math-errno` contract. Under the flag, a program
+must not use `errno` to detect errors of these functions.
+
+**Justification.**
+- C11 7.12 specifies each function by its arguments; 7.12.1 allows only
+  `errno` and the floating-point flags as side effects.
+- None of the functions takes a pointer.
+- glibc's libm has no writable state that these functions use (only
+  `_LIB_VERSION`, compat-only, and `signgam`, written only by the excluded
+  `lgamma`).
+- `EF_runtime` declarations cannot link with a user definition
+  (`Linking.v`), so CSE across units is sound.
+
+**Validation.** `harness/libm_difftest/pure.sh`, all 50 functions:
+- runs: 4 seeds × both ifunc selections (`GLIBC_TUNABLES=glibc.cpu.hwcaps=-AVX2,-FMA`),
+  8 runs of 300M calls each;
+- 0 result mismatches across repeated and shuffled calls;
+- 0 `errno` mismatches;
+- 0 changed canary bytes, and no output.
+
+The two ifunc selections give different bits for some functions, but each is
+deterministic, which is all the model needs: the Parameters are
+uninterpreted. `decl.sh` checks 32 declaration cases.
+
+**Axiom list:** exactly the four Parameters (no new `Axiom`).
+
+**Revert.** Remove the `BI_libm_*` built-ins, the Parameters and their
+extraction, and the `EF_runtime` case in `C2C.convertFundecl`.
+
