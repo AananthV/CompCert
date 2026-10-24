@@ -2,17 +2,18 @@
 # Differential test of the x86 Asm.v semantics against the hardware.
 # See README.md.
 # usage: run.sh [COMPCERT_TREE] [N_RANDOM_PER_INSTR] [SEED] [GROUPS]
-#   GROUPS: comma-separated subset of loadop,zx,cvt,shift,zxload (default: all)
+#   GROUPS: comma-separated subset of loadop,zx,cvt,shift,zxload,unal (default: all)
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 TREE=$(cd "${1:-$HERE/../../..}" && pwd)
 N=${2:-20000}
 SEED=${3:-0x9e3779b97f4a7c15}
-GROUPS_=${4:-loadop,zx,cvt,shift,zxload}
+GROUPS_=${4:-loadop,zx,cvt,shift,zxload,unal}
 OUT=${ASM_DIFFTEST_OUT:-$(mktemp -d)}
 mkdir -p "$OUT"
 cp "$HERE"/Semantics.v "$HERE"/Extract.v "$HERE"/check.ml "$HERE"/hw.c "$HERE"/hw.s \
-   "$HERE"/check_regs.ml "$HERE"/hw_regs.c "$HERE"/regs_frame.s "$OUT"
+   "$HERE"/check_regs.ml "$HERE"/hw_regs.c "$HERE"/regs_frame.s \
+   "$HERE"/check_unal.ml "$HERE"/hw_unal.c "$HERE"/unal_frame.s "$OUT"
 cd "$OUT"
 # Load paths of the CompCert tree, made absolute.
 FLAGS=$(sed -e "s|-R \([^ ]*\) |-R $TREE/\1 |g" "$TREE/_CoqProject")
@@ -41,5 +42,13 @@ if [ -n "$REGS" ]; then
   gcc -O1 -o hw_regs hw_regs.c regs_frame.s regs_tests.s
   ./hw_regs "$N" "$SEED" > hw_regs.txt
   ./check_regs < hw_regs.txt || status=1
+fi
+# Unaligned 64-bit loads and stores, and the memory model bound (#13).
+if [[ ,$GROUPS_, == *,unal,* ]]; then
+  echo "== unal"
+  build_checker check_unal check_unal.ml
+  gcc -O1 -o hw_unal hw_unal.c unal_frame.s
+  ./hw_unal "$N" "$SEED" > hw_unal.txt
+  ./check_unal < hw_unal.txt || status=1
 fi
 exit $status

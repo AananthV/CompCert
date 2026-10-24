@@ -10,6 +10,7 @@
 From Coq Require Import ZArith.
 From compcert Require Import Coqlib Integers Floats Values Memory Globalenvs AST.
 From compcert Require Import Asm Builtins.
+From Coq Require Import String.
 
 Definition dummy_ge : genv := Genv.empty_genv fundef unit nil.
 Definition dummy_fn : function := mkfunction signature_main nil.
@@ -142,3 +143,62 @@ Definition res_of_val (v: val) : res :=
   | Vsingle f => RSingle (Int.unsigned (Float32.to_bits f))
   | Vptr _ _ => RPtr
   end.
+
+(** * Unaligned 64-bit loads and stores (issue #13)
+
+  [run_store i inits base baseoff bytes lo n] is like [run_mem] for a
+  store instruction: it returns the [n] bytes at offsets [lo ...] of the
+  block after the store (as [Mint8unsigned] loads; [Vundef] for a byte
+  that cannot be read). *)
+
+Fixpoint zrange (n: nat) (lo: Z) : list Z :=
+  match n with O => nil | S n' => lo :: zrange n' (lo + 1) end.
+
+Definition run_store (i: instruction) (inits: list (preg * val)) (base: preg) (baseoff: Z)
+                     (bytes: list (Z * Z)) (lo: Z) (n: nat) : option (list val) :=
+  let (m1, b) := Mem.alloc Mem.empty 0 bufsize in
+  match store_bytes m1 b bytes with
+  | None => None
+  | Some m2 =>
+      let rs := fold_left (fun rs pv => rs # (fst pv) <- (snd pv)) inits (Pregmap.init Vundef) in
+      match exec_instr dummy_ge dummy_fn i (rs # base <- (Vptr b (Ptrofs.repr baseoff))) m2 with
+      | Next _ m3 =>
+          Some (map (fun ofs => match Mem.load Mint8unsigned m3 b ofs with
+                                | Some v => v | None => Vundef end) (zrange n lo))
+      | Stuck => None
+      end
+  end.
+
+(** Unit tests of the memory model around [perm_limit] (issue #13):
+  each test is expected to be [true]. *)
+
+Definition is_some {A: Type} (o: option A) : bool := match o with Some _ => true | None => false end.
+
+Local Open Scope string_scope.
+
+Definition perm_limit_tests : list (string * bool) :=
+  let (m1, b1) := Mem.alloc Mem.empty 0 Ptrofs.modulus in
+  let (m2, b2) := Mem.alloc Mem.empty 0 perm_limit in
+  let (m3, b3) := Mem.alloc Mem.empty 0 4096 in
+  let (m4, b4) := Mem.alloc Mem.empty (-8) (perm_limit + 100) in
+  ("huge block: byte at perm_limit-1 readable", is_some (Mem.load Mint8unsigned m1 b1 (perm_limit - 1))) ::
+  ("huge block: byte at perm_limit not readable", negb (is_some (Mem.load Mint8unsigned m1 b1 perm_limit))) ::
+  ("huge block: byte at 2^64-1 not readable", negb (is_some (Mem.load Mint8unsigned m1 b1 (Ptrofs.modulus - 1)))) ::
+  ("huge block: Mint64u load at perm_limit-8", is_some (Mem.loadv Mint64u m1 (Vptr b1 (Ptrofs.repr (perm_limit - 8))))) ::
+  ("huge block: no Mint64u load at perm_limit-7", negb (is_some (Mem.loadv Mint64u m1 (Vptr b1 (Ptrofs.repr (perm_limit - 7)))))) ::
+  ("huge block: no Mint64u load at 2^64-4", negb (is_some (Mem.loadv Mint64u m1 (Vptr b1 (Ptrofs.repr (Ptrofs.modulus - 4)))))) ::
+  ("huge block: Mint64u store at perm_limit-8", is_some (Mem.storev Mint64u m1 (Vptr b1 (Ptrofs.repr (perm_limit - 8))) (Vlong Int64.one))) ::
+  ("huge block: no Mint64u store at perm_limit-7", negb (is_some (Mem.storev Mint64u m1 (Vptr b1 (Ptrofs.repr (perm_limit - 7))) (Vlong Int64.one)))) ::
+  ("block [0,perm_limit): last byte readable", is_some (Mem.load Mint8unsigned m2 b2 (perm_limit - 1))) ::
+  ("block [0,4096): byte 4095 readable", is_some (Mem.load Mint8unsigned m3 b3 4095)) ::
+  ("block [0,4096): byte 4096 not readable", negb (is_some (Mem.load Mint8unsigned m3 b3 4096))) ::
+  ("block [0,4096): byte -1 not readable", negb (is_some (Mem.load Mint8unsigned m3 b3 (-1)))) ::
+  ("block [0,4096): Mint64u at 4088", is_some (Mem.load Mint64u m3 b3 4088)) ::
+  ("block [0,4096): no Mint64u at 4089", negb (is_some (Mem.load Mint64u m3 b3 4089))) ::
+  ("block [0,4096): Mint64u at 4081 (odd)", is_some (Mem.load Mint64u m3 b3 4081)) ::
+  ("block [0,4096): no Mint64 at 4081 (aligned chunk)", negb (is_some (Mem.load Mint64 m3 b3 4081))) ::
+  ("malloc-like block [-8,perm_limit+100): header at -8", is_some (Mem.store Mptr m4 b4 (-8) (Vlong Int64.one))) ::
+  ("malloc-like block: byte at perm_limit-1 readable", is_some (Mem.load Mint8unsigned m4 b4 (perm_limit - 1))) ::
+  ("malloc-like block: byte at perm_limit not readable", negb (is_some (Mem.load Mint8unsigned m4 b4 perm_limit))) ::
+  ("Mem.perm at perm_limit is never granted (drop_perm fails)", negb (is_some (Mem.drop_perm m1 b1 perm_limit (perm_limit + 1) Readable))) ::
+  nil.

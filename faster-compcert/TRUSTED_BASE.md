@@ -201,3 +201,46 @@ destination against the extracted semantics:
 **Revert.** Remove the four constructors, `exec_load_zx`, the printer cases, the
 `Ozextb64`/`Ozextw64` operators, the selection rules, and the flag.
 
+## 7. Bounded permissions and an unaligned 64-bit chunk (#13, option A)
+
+- **Approved:** by the owner, 2026-10-23, for the corrected proposal (option A)
+  on #13. The first proposal was withdrawn as unprovable.
+- **Merged in:** "Bounded permissions, unaligned Mint64u chunk, and opt-in byte-load merging".
+- **Flag:** the model change is unconditional, and it leaves generated code
+  unchanged. Byte merging is behind `-fmerge-bytes`, off by default.
+
+**Assumption.**
+1. **Memory model** (`Memtype.v`, `Memory.v`): `perm_limit := Ptrofs.modulus - 8`.
+   - Every `mem` satisfies `access_bounded`: no permission at offsets ≥ `perm_limit`.
+   - `Mem.alloc` clips its upper bound to `perm_limit`.
+   - Allocation lemmas that grant permissions gain the matching premise.
+2. **`Mint64u`** (`AST.v`, `Memdata.v`, `Values.v`): an 8-byte, align-1 chunk.
+   - Little-endian like `Mint64` for `Vlong`.
+   - Pointer-free: pointers store as `Undef` and read back as `Vundef`.
+   - It needed a `load_result` case and two forced lemma-spec adjustments,
+     listed in the proposal.
+3. **x86** (`Asm.v`, `TargetPrinter.ml`): `Pmovq_rm_u`/`Pmovq_mr_u` =
+   `exec_load`/`exec_store Mint64u`, printed as `movq`.
+
+**Justification.**
+- No real object has a byte at offset ≥ 2^64 − 8: x86-64 user space is below
+  2^47 or 2^56, and model offsets are relative to an object.
+- Unaligned `movq` is architecturally defined (Intel SDM Vol. 1 §4.1.1;
+  AC is off in Linux user mode).
+
+**Validation.**
+- **Prototype:** done before approval. 0 admits on all 6 targets, and
+  generated code unchanged.
+- **`harness/asm_difftest/` group `unal`:** unaligned `movq` loads and
+  stores at offsets 0..7, across cache lines, across a page boundary, and at
+  random addresses, against the extracted semantics. 160k tests per seed ×
+  4 seeds: 0 mismatches.
+- **Model unit tests around `perm_limit`:** 20/20 pass.
+- **Flag off:** generated code is byte-identical on 127 files.
+
+**Revert.**
+- Remove `Mint64u` and its cases, and `Pmovq_rm_u`/`Pmovq_mr_u`.
+- Remove `perm_limit`/`access_bounded`, the clipping in `alloc`, and the
+  added premises, then re-prove the fallout.
+- Remove the CSE hook and the flag.
+
