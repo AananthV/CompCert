@@ -1235,6 +1235,25 @@ let convertFundef loc env fd =
 
 let re_builtin = Str.regexp "__builtin_"
 
+(** Under [-ftrust-libm], the C library functions listed in [Builtins0]
+    ([libm_d1_names], etc.) are declared as runtime functions whose
+    semantics is the built-in [BI_libm_d1 name], etc.: the result is a
+    function of the arguments, and memory is unchanged.  This assumes that
+    the library function depends on and modifies no state other than
+    [errno], and ignores [errno], like GCC's [-fno-math-errno].
+    A declaration is treated this way only if it is not static and has
+    exactly the C99 prototype of the function, e.g. [double floor(double)].
+    A function that is defined in the program keeps its definition. *)
+
+let is_trusted_libm sto name sg =
+  !Clflags.option_ftrust_libm && not !Clflags.option_interp
+  && sto <> C.Storage_static
+  && match Builtins.lookup_builtin_function name sg with
+     | Some (Builtins.BI_standard (Builtins0.BI_libm_d1 _ | Builtins0.BI_libm_d2 _
+                                  | Builtins0.BI_libm_s1 _ | Builtins0.BI_libm_s2 _)) ->
+         true
+     | _ -> false
+
 let convertFundecl env (sto, id, ty, optinit) =
   let (args, res, cconv) =
     match convertTyp env ty with
@@ -1247,7 +1266,8 @@ let convertFundecl env (sto, id, ty, optinit) =
     if id.name = "free" then AST.EF_free else
     if Str.string_match re_builtin id.name 0
     && List.mem_assoc id.name builtins.builtin_functions
-    then AST.EF_builtin(id.name, sg)
+    then AST.EF_builtin(id.name, sg) else
+    if is_trusted_libm sto id.name sg then AST.EF_runtime(id.name, sg)
     else AST.EF_external(id.name, sg) in
   (id',  AST.Gfun(Ctypes.External(ef, args, res, cconv)))
 
