@@ -232,4 +232,14 @@ Proof using get_sound.
   unfold addr_deltas; intros; congruence.
 Qed.
 
+Lemma combine_merge_load_sound:
+  forall op args addr args' v,
+  combine_merge_load get op args = Some (addr, args') ->
+  eval_operation ge sp op (map valu args) m = Some v ->
+  exists a v', eval_addressing ge sp addr (map valu args') = Some a
+            /\ Mem.loadv Mint64u m a = Some v' /\ Val.lessdef v v'.
+Proof.
+  unfold combine_merge_load; intros; discriminate.
+Qed.
+
 End COMBINE.

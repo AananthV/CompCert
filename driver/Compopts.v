@@ -61,6 +61,9 @@ Parameter optim_shiftmask: unit -> bool.
 (** Flag -fzext-load.  For 8/16-bit zero extensions with a 64-bit result. *)
 Parameter optim_zextload: unit -> bool.
 
+(** Flag -fmerge-bytes.  For merging byte loads into unaligned 64-bit loads. *)
+Parameter optim_mergebytes: unit -> bool.
+
 (** Flag -fredundancy.  For dead code elimination. *)
 Parameter optim_redundancy: unit -> bool.
 

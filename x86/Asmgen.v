@@ -708,6 +708,8 @@ Definition transl_load (chunk: memory_chunk)
       do r <- ireg_of dest; OK(Pmovl_rm r am :: k)
   | Mint64 =>
       do r <- ireg_of dest; OK(Pmovq_rm r am :: k)
+  | Mint64u =>
+      do r <- ireg_of dest; OK(Pmovq_rm_u r am :: k)
   | Mfloat32 =>
       do r <- freg_of dest; OK(Pmovss_fm r am :: k)
   | Mfloat64 =>
@@ -753,6 +755,8 @@ Definition transl_store (chunk: memory_chunk)
       do r <- ireg_of src; OK(Pmovl_mr am r :: k)
   | Mint64 =>
       do r <- ireg_of src; OK(Pmovq_mr am r :: k)
+  | Mint64u =>
+      do r <- ireg_of src; OK(Pmovq_mr_u am r :: k)
   | Mfloat32 =>
       do r <- freg_of src; OK(Pmovss_mf am r :: k)
   | Mfloat64 =>

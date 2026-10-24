@@ -42,6 +42,25 @@ The first four cases are represented by the following type of permissions.
 Being empty is represented by the absence of any permission.
 *)
 
+(** Permissions are only ever granted at offsets below [perm_limit].
+  Consequently, an access of at most 8 bytes that starts at a permitted
+  offset never straddles the [2^64] (or [2^32]) boundary of pointer
+  offsets.  No real object comes within 8 bytes of the end of the
+  address space. *)
+
+Definition perm_limit : Z := Ptrofs.modulus - 8.
+
+Lemma perm_limit_max: perm_limit < Ptrofs.max_unsigned.
+Proof.
+  unfold perm_limit, Ptrofs.max_unsigned. lia.
+Qed.
+
+Lemma perm_limit_large: 4294967288 <= perm_limit.
+Proof.
+  unfold perm_limit, Ptrofs.modulus, Ptrofs.wordsize, Wordsize_Ptrofs.wordsize.
+  destruct Archi.ptr64; simpl; lia.
+Qed.
+
 Inductive permission: Type :=
   | Freeable: permission
   | Writable: permission
@@ -203,6 +222,8 @@ Axiom perm_max:
   In other words, invalid blocks, not yet allocated, are all empty. *)
 Axiom perm_valid_block:
   forall m b ofs k p, perm m b ofs k p -> valid_block m b.
+Axiom perm_bounded:
+  forall m b ofs k p, perm m b ofs k p -> ofs < perm_limit.
 
 (* Unused?
 (** The [Mem.perm] predicate is decidable. *)
@@ -638,7 +659,7 @@ Axiom perm_alloc_1:
   forall b' ofs k p, perm m1 b' ofs k p -> perm m2 b' ofs k p.
 Axiom perm_alloc_2:
   forall m1 lo hi m2 b, alloc m1 lo hi = (m2, b) ->
-  forall ofs k, lo <= ofs < hi -> perm m2 b ofs k Freeable.
+  forall ofs k, lo <= ofs < hi -> ofs < perm_limit -> perm m2 b ofs k Freeable.
 Axiom perm_alloc_3:
   forall m1 lo hi m2 b, alloc m1 lo hi = (m2, b) ->
   forall ofs k p, perm m2 b ofs k p -> lo <= ofs < hi.
@@ -661,7 +682,8 @@ Axiom valid_access_alloc_other:
 Axiom valid_access_alloc_same:
   forall m1 lo hi m2 b, alloc m1 lo hi = (m2, b) ->
   forall chunk ofs,
-  lo <= ofs -> ofs + size_chunk chunk <= hi -> (align_chunk chunk | ofs) ->
+  lo <= ofs -> ofs + size_chunk chunk <= hi -> ofs + size_chunk chunk <= perm_limit ->
+  (align_chunk chunk | ofs) ->
   valid_access m2 chunk b ofs Freeable.
 Axiom valid_access_alloc_inv:
   forall m1 lo hi m2 b, alloc m1 lo hi = (m2, b) ->
@@ -691,7 +713,8 @@ Axiom load_alloc_same:
 Axiom load_alloc_same':
   forall m1 lo hi m2 b, alloc m1 lo hi = (m2, b) ->
   forall chunk ofs,
-  lo <= ofs -> ofs + size_chunk chunk <= hi -> (align_chunk chunk | ofs) ->
+  lo <= ofs -> ofs + size_chunk chunk <= hi -> ofs + size_chunk chunk <= perm_limit ->
+  (align_chunk chunk | ofs) ->
   load chunk m2 b ofs = Some Vundef.
 
 (** ** Properties of [free]. *)
@@ -1154,7 +1177,7 @@ Axiom alloc_left_mapped_inject:
   valid_block m2 b2 ->
   0 <= delta <= Ptrofs.max_unsigned ->
   (forall ofs k p, perm m2 b2 ofs k p -> delta = 0 \/ 0 <= ofs < Ptrofs.max_unsigned) ->
-  (forall ofs k p, lo <= ofs < hi -> perm m2 b2 (ofs + delta) k p) ->
+  (forall ofs k p, lo <= ofs < hi -> ofs < perm_limit -> perm m2 b2 (ofs + delta) k p) ->
   inj_offset_aligned delta (hi-lo) ->
   (forall b delta' ofs k p,
    f b = Some (b2, delta') ->

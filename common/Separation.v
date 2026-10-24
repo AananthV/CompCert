@@ -335,14 +335,14 @@ Qed.
 Lemma alloc_rule:
   forall m lo hi b m' P,
   Mem.alloc m lo hi = (m', b) ->
-  0 <= lo -> hi <= Ptrofs.modulus ->
+  0 <= lo -> hi <= perm_limit ->
   m |= P ->
   m' |= range b lo hi ** P.
 Proof.
   intros; simpl. split; [|split].
-- split; auto. split; auto. intros.
+- split; auto. split. unfold perm_limit in *; lia. intros.
   apply Mem.perm_implies with Freeable; auto with mem.
-  eapply Mem.perm_alloc_2; eauto.
+  eapply Mem.perm_alloc_2; eauto. lia.
 - apply (m_invar P) with m; auto. eapply Mem.alloc_unchanged_on; eauto.
 - red; simpl. intros. destruct H3; subst b0.
   eelim Mem.fresh_block_alloc; eauto. eapply (m_valid P); eauto.
@@ -691,7 +691,7 @@ Lemma alloc_parallel_rule:
   (8 | delta) ->
   lo = delta ->
   hi = delta + Z.max 0 sz1 ->
-  0 <= sz2 <= Ptrofs.max_unsigned ->
+  0 <= sz2 <= perm_limit ->
   0 <= delta -> hi <= sz2 ->
   exists j',
      m2' |= range b2 0 lo ** range b2 hi sz2 ** minjection j' m1' ** P
@@ -700,6 +700,7 @@ Lemma alloc_parallel_rule:
   /\ (forall b, b <> b1 -> j' b = j b).
 Proof.
   intros until delta; intros SEP ALLOC1 ALLOC2 ALIGN LO HI RANGE1 RANGE2 RANGE3.
+  generalize perm_limit_max; intros PLM.
   assert (RANGE4: lo <= hi) by extlia.
   assert (FRESH1: ~Mem.valid_block m1 b1) by (eapply Mem.fresh_block_alloc; eauto).
   assert (FRESH2: ~Mem.valid_block m2 b2) by (eapply Mem.fresh_block_alloc; eauto).
@@ -712,7 +713,7 @@ Proof.
 - right; lia.
 - intros. assert (0 <= ofs < sz2) by (eapply Mem.perm_alloc_3; eauto). lia.
 - intros. apply Mem.perm_implies with Freeable; auto with mem.
-  eapply Mem.perm_alloc_2; eauto. extlia.
+  eapply Mem.perm_alloc_2; eauto; extlia.
 - red. replace (sz1 - 0) with sz1 by lia. eapply Z.divide_trans; eauto using min_safe_alignment_8.
 - intros. elim FRESH2. eapply Mem.valid_block_inject_2; eauto.
 - intros (j' & INJ' & J1 & J2 & J3).
@@ -721,9 +722,9 @@ Proof.
   split; [|split].
 + simpl. intuition auto; try (unfold Ptrofs.max_unsigned in *; lia).
 * apply Mem.perm_implies with Freeable; auto with mem.
-  eapply Mem.perm_alloc_2; eauto. lia.
+  eapply Mem.perm_alloc_2; eauto; lia.
 * apply Mem.perm_implies with Freeable; auto with mem.
-  eapply Mem.perm_alloc_2; eauto. lia.
+  eapply Mem.perm_alloc_2; eauto; lia.
 * red; simpl; intros. destruct H1, H2. lia.
 * red; simpl; intros.
   assert (b = b2) by tauto. subst b.
@@ -886,7 +887,7 @@ Lemma alloc_parallel_rule_2:
   (8 | delta) ->
   lo = delta ->
   hi = delta + Z.max 0 sz1 ->
-  0 <= sz2 <= Ptrofs.max_unsigned ->
+  0 <= sz2 <= perm_limit ->
   0 <= delta -> hi <= sz2 ->
   exists j',
      m2' |= range b2 0 lo ** range b2 hi sz2 ** minjection j' m1' ** globalenv_inject ge j' ** P

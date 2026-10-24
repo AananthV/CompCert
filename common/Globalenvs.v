@@ -1074,7 +1074,7 @@ Definition read_as_zero (m: mem) (b: block) (ofs len: Z) : Prop :=
   Mem.load chunk m b p =
   Some (match chunk with
         | Mbool | Mint8unsigned | Mint8signed | Mint16unsigned | Mint16signed | Mint32 => Vint Int.zero
-        | Mint64 => Vlong Int64.zero
+        | Mint64 | Mint64u => Vlong Int64.zero
         | Mfloat32 => Vsingle Float32.zero
         | Mfloat64 => Vfloat Float.zero
         | Many32 | Many64 => Vundef
@@ -1619,6 +1619,7 @@ Theorem init_mem_inversion:
   init_mem p = Some m ->
   In (id, Gvar v) p.(prog_defs) ->
   init_data_list_aligned 0 v.(gvar_init)
+  /\ init_data_list_size v.(gvar_init) <= perm_limit
   /\ forall i o, In (Init_addrof i o) v.(gvar_init) -> exists b, find_symbol (globalenv p) i = Some b.
 Proof.
   intros until v. unfold init_mem. set (ge := globalenv p).
@@ -1632,7 +1633,11 @@ Proof.
   destruct (Mem.alloc m 0 sz) as [m1 b].
   destruct (store_zeros m1 b 0 sz) as [m2|]; try discriminate.
   destruct (store_init_data_list ge m2 b 0 il) as [m3|] eqn:B; try discriminate.
-  split. eapply store_init_data_list_aligned; eauto. intros; eapply store_init_data_list_free_idents; eauto.
+  split. eapply store_init_data_list_aligned; eauto.
+  split. destruct (zle sz 0). generalize perm_limit_large; lia.
+    apply Mem.range_perm_drop_1 in A. exploit (A (sz - 1)). lia.
+    intros P. apply Mem.perm_bounded in P. lia.
+  intros; eapply store_init_data_list_free_idents; eauto.
 + eapply IHdefs; eauto.
 Qed.
 
@@ -1699,6 +1704,7 @@ Lemma alloc_global_exists:
   | (id, Gfun f) => True
   | (id, Gvar v) =>
         init_data_list_aligned 0 v.(gvar_init)
+     /\ init_data_list_size v.(gvar_init) <= perm_limit
      /\ forall i o, In (Init_addrof i o) v.(gvar_init) -> exists b, find_symbol ge i = Some b
   end ->
   exists m', alloc_global ge m idg = Some m'.
@@ -1706,12 +1712,12 @@ Proof.
   intros m [id [f|v]]; intros; simpl.
 - destruct (Mem.alloc m 0 1) as [m1 b] eqn:ALLOC.
   destruct (Mem.range_perm_drop_2 m1 b 0 1 Nonempty) as [m2 DROP].
-  red; intros; eapply Mem.perm_alloc_2; eauto.
+  red; intros; eapply Mem.perm_alloc_2; eauto. generalize perm_limit_large; lia.
   exists m2; auto.
-- destruct H as [P Q].
-  set (sz := init_data_list_size (gvar_init v)).
+- destruct H as [P [SZ Q]].
+  set (sz := init_data_list_size (gvar_init v)) in *.
   destruct (Mem.alloc m 0 sz) as [m1 b] eqn:ALLOC.
-  assert (P1: Mem.range_perm m1 b 0 sz Cur Freeable) by (red; intros; eapply Mem.perm_alloc_2; eauto).
+  assert (P1: Mem.range_perm m1 b 0 sz Cur Freeable) by (red; intros; eapply Mem.perm_alloc_2; eauto; lia).
   destruct (@store_zeros_exists m1 b 0 sz) as [m2 ZEROS].
   red; intros. apply Mem.perm_implies with Freeable; auto with mem.
   rewrite ZEROS.
@@ -1732,6 +1738,7 @@ Theorem init_mem_exists:
   forall p,
   (forall id v, In (id, Gvar v) (prog_defs p) ->
         init_data_list_aligned 0 v.(gvar_init)
+     /\ init_data_list_size v.(gvar_init) <= perm_limit
      /\ forall i o, In (Init_addrof i o) v.(gvar_init) -> exists b, find_symbol (globalenv p) i = Some b) ->
   exists m, init_mem p = Some m.
 Proof.

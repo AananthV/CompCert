@@ -183,6 +183,7 @@ let name_of_chunk = function
   | Mint16unsigned -> "Mint16unsigned"
   | Mint32 -> "Mint32"
   | Mint64 -> "Mint64"
+  | Mint64u -> "Mint64u"
   | Mfloat32 -> "Mfloat32"
   | Mfloat64 -> "Mfloat64"
   | Many32 -> "Many32"

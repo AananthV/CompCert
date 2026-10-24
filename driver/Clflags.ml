@@ -38,6 +38,7 @@ let option_floadop = ref false
 let option_fshiftmask = ref false
 let option_ftrust_libm = ref false
 let option_fzextload = ref false
+let option_fmergebytes = ref false
 let option_fifconversion = ref true
 let option_Obranchless = ref false
 let option_falignfunctions = ref (None: int option)

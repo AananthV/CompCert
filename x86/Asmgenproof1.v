@@ -1663,6 +1663,10 @@ Proof.
   econstructor; split.
   apply exec_straight_one. simpl. unfold exec_store. rewrite H1. eauto. auto.
   intros. Simplifs.
+(* int64u *)
+  econstructor; split.
+  apply exec_straight_one. simpl. unfold exec_store. rewrite H1. eauto. auto.
+  intros. Simplifs.
 (* float32 *)
   econstructor; split.
   apply exec_straight_one. simpl. unfold exec_store. rewrite H1. eauto. auto.

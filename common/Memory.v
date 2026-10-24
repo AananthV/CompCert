@@ -63,6 +63,8 @@ Record mem' : Type := mkmem {
     forall b ofs, perm_order'' (mem_access#b ofs Max) (mem_access#b ofs Cur);
   nextblock_noaccess:
     forall b ofs k, ~(Plt b nextblock) -> mem_access#b ofs k = None;
+  access_bounded:
+    forall b ofs k, perm_limit <= ofs -> mem_access#b ofs k = None;
   contents_default:
     forall b, fst mem_contents#b = Undef
 }.
@@ -70,9 +72,9 @@ Record mem' : Type := mkmem {
 Definition mem := mem'.
 
 Lemma mkmem_ext:
- forall cont1 cont2 acc1 acc2 next1 next2 a1 a2 b1 b2 c1 c2,
+ forall cont1 cont2 acc1 acc2 next1 next2 a1 a2 b1 b2 c1 c2 d1 d2,
   cont1=cont2 -> acc1=acc2 -> next1=next2 ->
-  mkmem cont1 acc1 next1 a1 b1 c1 = mkmem cont2 acc2 next2 a2 b2 c2.
+  mkmem cont1 acc1 next1 a1 b1 d1 c1 = mkmem cont2 acc2 next2 a2 b2 d2 c2.
 Proof.
   intros. subst. f_equal; apply proof_irr.
 Qed.
@@ -144,6 +146,13 @@ Proof.
   eapply nextblock_noaccess; eauto.
   rewrite H0 in H.
   contradiction.
+Qed.
+
+Theorem perm_bounded:
+  forall m b ofs k p, perm m b ofs k p -> ofs < perm_limit.
+Proof.
+  unfold perm; intros. destruct (zlt ofs perm_limit); auto.
+  rewrite access_bounded in H by lia. contradiction.
 Qed.
 
 Local Hint Resolve perm_valid_block: mem.
@@ -338,7 +347,7 @@ Qed.
 Program Definition empty: mem :=
   mkmem (PMap.init (ZMap.init Undef))
         (PMap.init (fun ofs k => None))
-        1%positive _ _ _.
+        1%positive _ _ _ _.
 
 (** Allocation of a fresh block with the given bounds.  Return an updated
   memory state and the address of the fresh block, which initially contains
@@ -350,14 +359,15 @@ Program Definition alloc (m: mem) (lo hi: Z) :=
                    (ZMap.init Undef)
                    m.(mem_contents))
          (PMap.set m.(nextblock)
-                   (fun ofs k => if zle lo ofs && zlt ofs hi then Some Freeable else None)
+                   (fun ofs k => if zle lo ofs && zlt ofs (Z.min hi perm_limit)
+                                 then Some Freeable else None)
                    m.(mem_access))
          (Pos.succ m.(nextblock))
-         _ _ _,
+         _ _ _ _,
    m.(nextblock)).
 Next Obligation.
   repeat rewrite PMap.gsspec. destruct (peq b (nextblock m)).
-  subst b. destruct (zle lo ofs && zlt ofs hi); red; auto with mem.
+  subst b. destruct (zle lo ofs && zlt ofs (Z.min hi perm_limit)); red; auto with mem.
   apply access_max.
 Qed.
 Next Obligation.
@@ -365,6 +375,12 @@ Next Obligation.
   subst b. elim H. apply Plt_succ.
   apply nextblock_noaccess. red; intros; elim H.
   apply Plt_trans_succ; auto.
+Qed.
+Next Obligation.
+  rewrite PMap.gsspec. destruct (peq b (nextblock m)).
+  destruct (zle lo ofs && zlt ofs (Z.min hi perm_limit)) eqn:E; auto.
+  InvBooleans. extlia.
+  apply access_bounded; auto.
 Qed.
 Next Obligation.
   rewrite PMap.gsspec. destruct (peq b (nextblock m)). auto. apply contents_default.
@@ -380,7 +396,7 @@ Program Definition unchecked_free (m: mem) (b: block) (lo hi: Z): mem :=
         (PMap.set b
                 (fun ofs k => if zle lo ofs && zlt ofs hi then None else m.(mem_access)#b ofs k)
                 m.(mem_access))
-        m.(nextblock) _ _ _.
+        m.(nextblock) _ _ _ _.
 Next Obligation.
   repeat rewrite PMap.gsspec. destruct (peq b0 b).
   destruct (zle lo ofs && zlt ofs hi). red; auto. apply access_max.
@@ -390,6 +406,11 @@ Next Obligation.
   repeat rewrite PMap.gsspec. destruct (peq b0 b). subst.
   destruct (zle lo ofs && zlt ofs hi). auto. apply nextblock_noaccess; auto.
   apply nextblock_noaccess; auto.
+Qed.
+Next Obligation.
+  repeat rewrite PMap.gsspec. destruct (peq b0 b). subst.
+  destruct (zle lo ofs && zlt ofs hi). auto. apply access_bounded; auto.
+  apply access_bounded; auto.
 Qed.
 Next Obligation.
   apply contents_default.
@@ -538,11 +559,12 @@ Program Definition store (chunk: memory_chunk) (m: mem) (b: block) (ofs: Z) (v: 
                           m.(mem_contents))
                 m.(mem_access)
                 m.(nextblock)
-                _ _ _)
+                _ _ _ _)
   else
     None.
 Next Obligation. apply access_max. Qed.
 Next Obligation. apply nextblock_noaccess; auto. Qed.
+Next Obligation. apply access_bounded; auto. Qed.
 Next Obligation.
   rewrite PMap.gsspec. destruct (peq b0 b).
   rewrite setN_default. apply contents_default.
@@ -571,11 +593,12 @@ Program Definition storebytes (m: mem) (b: block) (ofs: Z) (bytes: list memval) 
              (PMap.set b (setN bytes ofs (m.(mem_contents)#b)) m.(mem_contents))
              m.(mem_access)
              m.(nextblock)
-             _ _ _)
+             _ _ _ _)
   else
     None.
 Next Obligation. apply access_max. Qed.
 Next Obligation. apply nextblock_noaccess; auto. Qed.
+Next Obligation. apply access_bounded; auto. Qed.
 Next Obligation.
   rewrite PMap.gsspec. destruct (peq b0 b).
   rewrite setN_default. apply contents_default.
@@ -593,7 +616,7 @@ Program Definition drop_perm (m: mem) (b: block) (lo hi: Z) (p: permission): opt
                 (PMap.set b
                         (fun ofs k => if zle lo ofs && zlt ofs hi then Some p else m.(mem_access)#b ofs k)
                         m.(mem_access))
-                m.(nextblock) _ _ _)
+                m.(nextblock) _ _ _ _)
   else None.
 Next Obligation.
   repeat rewrite PMap.gsspec. destruct (peq b0 b). subst b0.
@@ -602,6 +625,14 @@ Next Obligation.
 Qed.
 Next Obligation.
   exploit (nextblock_noaccess m b0 ofs k). auto. intros NOACC.
+  rewrite PMap.gsspec. destruct (peq b0 b). subst b0.
+  destruct (zle lo ofs). destruct (zlt ofs hi).
+  assert (P: perm m b ofs k Freeable) by auto using perm_cur.
+  unfold perm in P. rewrite NOACC in P. contradiction.
+  auto. auto. auto.
+Qed.
+Next Obligation.
+  exploit (access_bounded m b0 ofs k). auto. intros NOACC.
   rewrite PMap.gsspec. destruct (peq b0 b). subst b0.
   destruct (zle lo ofs). destruct (zlt ofs hi).
   assert (P: perm m b ofs k Freeable) by auto using perm_cur.
@@ -1713,11 +1744,11 @@ Proof.
 Qed.
 
 Theorem perm_alloc_2:
-  forall ofs k, lo <= ofs < hi -> perm m2 b ofs k Freeable.
+  forall ofs k, lo <= ofs < hi -> ofs < perm_limit -> perm m2 b ofs k Freeable.
 Proof.
-  unfold perm; intros. injection ALLOC; intros. rewrite <- H1; simpl.
+  unfold perm; intros. injection ALLOC; intros. rewrite <- H2; simpl.
   subst b. rewrite PMap.gss. unfold proj_sumbool. rewrite zle_true.
-  rewrite zlt_true. simpl. auto with mem. lia. lia.
+  rewrite zlt_true. simpl. auto with mem. extlia. lia.
 Qed.
 
 Theorem perm_alloc_inv:
@@ -1727,8 +1758,8 @@ Theorem perm_alloc_inv:
 Proof.
   intros until p; unfold perm. inv ALLOC. simpl.
   rewrite PMap.gsspec. unfold eq_block. destruct (peq b' (nextblock m1)); intros.
-  destruct (zle lo ofs); try contradiction. destruct (zlt ofs hi); try contradiction.
-  split; auto.
+  destruct (zle lo ofs); try contradiction. destruct (zlt ofs (Z.min hi perm_limit)); try contradiction.
+  split; extlia.
   auto.
 Qed.
 
@@ -1757,11 +1788,12 @@ Qed.
 
 Theorem valid_access_alloc_same:
   forall chunk ofs,
-  lo <= ofs -> ofs + size_chunk chunk <= hi -> (align_chunk chunk | ofs) ->
+  lo <= ofs -> ofs + size_chunk chunk <= hi -> ofs + size_chunk chunk <= perm_limit ->
+  (align_chunk chunk | ofs) ->
   valid_access m2 chunk b ofs Freeable.
 Proof.
   intros. constructor; auto with mem.
-  red; intros. apply perm_alloc_2. lia.
+  red; intros. apply perm_alloc_2. lia. lia.
 Qed.
 
 Local Hint Resolve valid_access_alloc_other valid_access_alloc_same: mem.
@@ -1822,13 +1854,14 @@ Qed.
 
 Theorem load_alloc_same':
   forall chunk ofs,
-  lo <= ofs -> ofs + size_chunk chunk <= hi -> (align_chunk chunk | ofs) ->
+  lo <= ofs -> ofs + size_chunk chunk <= hi -> ofs + size_chunk chunk <= perm_limit ->
+  (align_chunk chunk | ofs) ->
   load chunk m2 b ofs = Some Vundef.
 Proof.
   intros. assert (exists v, load chunk m2 b ofs = Some v).
     apply valid_access_load. constructor; auto.
-    red; intros. eapply perm_implies. apply perm_alloc_2. lia. auto with mem.
-  destruct H2 as [v LOAD]. rewrite LOAD. decEq.
+    red; intros. eapply perm_implies. apply perm_alloc_2. lia. lia. auto with mem.
+  destruct H3 as [v LOAD]. rewrite LOAD. decEq.
   eapply load_alloc_same; eauto.
 Qed.
 
@@ -2648,7 +2681,7 @@ Lemma alloc_left_mapped_inj:
   alloc m1 lo hi = (m1', b1) ->
   valid_block m2 b2 ->
   inj_offset_aligned delta (hi-lo) ->
-  (forall ofs k p, lo <= ofs < hi -> perm m2 b2 (ofs + delta) k p) ->
+  (forall ofs k p, lo <= ofs < hi -> ofs < perm_limit -> perm m2 b2 (ofs + delta) k p) ->
   f b1 = Some(b2, delta) ->
   mem_inj f m1' m2.
 Proof.
@@ -2656,7 +2689,7 @@ Proof.
 - (* perm *)
   intros.
   exploit perm_alloc_inv; eauto. intros. destruct (eq_block b0 b1). subst b0.
-  rewrite H4 in H5; inv H5. eauto. eauto.
+  rewrite H4 in H5; inv H5. eapply H3; eauto. eapply perm_bounded; eauto. eauto.
 - (* align *)
   intros. destruct (eq_block b0 b1).
 + subst b0. assert (delta0 = delta) by congruence. subst delta0.
@@ -3007,15 +3040,15 @@ Proof.
   intros.
   eapply perm_implies with Freeable; auto with mem.
   eapply perm_alloc_2; eauto.
-  lia.
+  lia. lia.
   intros. eapply perm_alloc_inv in H; eauto.
   generalize (perm_alloc_inv _ _ _ _ _ H0 b0 ofs Max Nonempty); intros PERM.
   destruct (eq_block b0 b).
   subst b0.
-  assert (EITHER: lo1 <= ofs < hi1 \/ ~(lo1 <= ofs < hi1)) by lia.
+  assert (EITHER: lo1 <= ofs < hi1 /\ ofs < perm_limit \/ ~(lo1 <= ofs < hi1 /\ ofs < perm_limit)) by lia.
   destruct EITHER.
-  left. apply perm_implies with Freeable; auto with mem. eapply perm_alloc_2; eauto.
-  right; tauto.
+  left. apply perm_implies with Freeable; auto with mem. eapply perm_alloc_2; eauto; lia.
+  right; intros A. generalize (perm_bounded _ _ _ _ _ A); intros. tauto.
   exploit mext_perm_inv0; intuition eauto using perm_alloc_1, perm_alloc_4.
 Qed.
 
@@ -3831,7 +3864,7 @@ Theorem alloc_left_mapped_inject:
   0 <= delta <= Ptrofs.max_unsigned ->
   delta = 0 \/ 0 <= lo ->
   (forall ofs k p, perm m2 b2 ofs k p -> delta = 0 \/ 0 <= ofs < Ptrofs.max_unsigned) ->
-  (forall ofs k p, lo <= ofs < hi -> perm m2 b2 (ofs + delta) k p) ->
+  (forall ofs k p, lo <= ofs < hi -> ofs < perm_limit -> perm m2 b2 (ofs + delta) k p) ->
   inj_offset_aligned delta (hi-lo) ->
   (forall b delta' ofs k p,
    f b = Some (b2, delta') ->
@@ -3893,20 +3926,21 @@ Proof.
   destruct (eq_block b b1).
   + subst. injection H1; intros; subst b' delta0. destruct H2.
     * exploit perm_alloc_inv; eauto; rewrite dec_eq_true; intro.
-      exploit RANGE3. apply PERM with (k := Max) (p := Nonempty); eauto.
+      exploit RANGE3. apply PERM with (k := Max) (p := Nonempty); eauto; eapply perm_bounded; eauto.
       generalize (Ptrofs.unsigned_range_2 ofs). lia.
     * exploit perm_alloc_inv; eauto; rewrite dec_eq_true; intro.
-      exploit RANGE3. apply PERM with (k := Max) (p := Nonempty); eauto.
+      exploit RANGE3. apply PERM with (k := Max) (p := Nonempty); eauto; eapply perm_bounded; eauto.
       generalize (Ptrofs.unsigned_range_2 ofs). lia.
   + eapply mi_representable0; try eassumption.
     destruct H2; eauto using perm_alloc_4.
 - (* perm inv *)
   intros. unfold f' in H1; destruct (eq_block b0 b1).
   + inversion H1; clear H1; subst b0 b3 delta0.
-    assert (EITHER: lo <= ofs < hi \/ ~(lo <= ofs < hi)) by lia.
+    assert (EITHER: lo <= ofs < hi /\ ofs < perm_limit \/ ~(lo <= ofs < hi /\ ofs < perm_limit)) by lia.
     destruct EITHER.
-    * left. apply perm_implies with Freeable; auto with mem. eapply perm_alloc_2; eauto.
-    * right; intros A. eapply perm_alloc_inv in A; eauto. rewrite dec_eq_true in A. tauto.
+    * left. apply perm_implies with Freeable; auto with mem. eapply perm_alloc_2; eauto; lia.
+    * right; intros A. generalize (perm_bounded _ _ _ _ _ A); intros.
+      eapply perm_alloc_inv in A; eauto. rewrite dec_eq_true in A. tauto.
   + exploit mi_perm_inv0; eauto. intuition eauto using perm_alloc_1, perm_alloc_4.
 - (* metadata *)
   intros. unfold f' in H1; destruct (eq_block b b1).
@@ -3942,7 +3976,7 @@ Proof.
   auto.
   auto.
   intros. apply perm_implies with Freeable; auto with mem.
-  eapply perm_alloc_2; eauto. lia.
+  eapply perm_alloc_2; eauto. lia. lia.
   red; intros. apply Z.divide_0_r.
   intros. apply (valid_not_valid_diff m2 b2 b2); eauto with mem.
   intros [f' [A [B [C D]]]].
@@ -4335,7 +4369,7 @@ Proof.
   red. intros. apply Z.divide_0_r.
   intros.
   apply perm_implies with Freeable; auto with mem.
-  eapply perm_alloc_2; eauto. lia.
+  eapply perm_alloc_2; eauto. lia. lia.
   unfold flat_inj. apply pred_dec_true.
   rewrite (alloc_result _ _ _ _ _ H). auto.
 Qed.

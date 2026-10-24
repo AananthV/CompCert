@@ -613,6 +613,28 @@ Proof.
   simpl. f_equal. eapply num_holds_reg; eauto. eauto.
 Qed.
 
+(** Merging of byte loads. *)
+
+Lemma merge_load_sound:
+  forall valu ge sp rs m n op vl addr rl v,
+  numbering_holds valu ge sp rs m n ->
+  merge_load n op vl = Some (addr, rl) ->
+  eval_operation ge sp op (map valu vl) m = Some v ->
+  exists a v', eval_addressing ge sp addr rs##rl = Some a
+            /\ Mem.loadv Mint64u m a = Some v' /\ Val.lessdef v v'.
+Proof.
+  unfold merge_load; intros.
+  destruct (Compopts.optim_mergebytes tt); [|discriminate].
+  set (get := fun v => find_valnum_num v n.(num_eqs)) in *.
+  destruct (combine_merge_load get op vl) as [[addr1 vl1]|] eqn:CM; [|discriminate].
+  destruct (regs_valnums n vl1) as [rl1|] eqn:RV; inv H0.
+  assert (GET: forall v rhs, get v = Some rhs -> rhs_eval_to valu ge sp m rhs (valu v)).
+  { unfold get; intros. exploit num_holds_eq; eauto.
+    eapply find_valnum_num_charact; eauto. intros EH; inv EH; auto. }
+  erewrite regs_valnums_sound by eauto.
+  eapply combine_merge_load_sound; eauto.
+Qed.
+
 Lemma same_base_disjoint_sound:
   forall valu ge sp rs m n addr1 vl1 sz1 addr2 vl2 sz2 b1 ofs1 b2 ofs2,
   numbering_holds valu ge sp rs m n ->
@@ -1340,7 +1362,24 @@ Proof.
   eapply add_op_holds; eauto.
   apply set_reg_lessdef; auto.
   eapply Val.lessdef_trans; eauto.
-* (* possibly simplified *)
+* destruct (merge_load n1 op vl) as [[addr rl]|] eqn:ML.
+** (* replaced by an unaligned 64-bit load *)
+  exploit merge_load_sound; eauto. rewrite <- EQ; eauto. intros (a & v' & ADDR & LD & LDF).
+  exploit eval_addressing_lessdef. apply regs_lessdef_regs; eauto. eexact ADDR.
+  intros [a' [A B]].
+  assert (ADDR': eval_addressing tge sp addr rs'##rl = Some a').
+  { rewrite <- A. apply eval_addressing_preserved. exact symbols_preserved. }
+  exploit Mem.loadv_extends; eauto.
+  intros [v'' [X Y]].
+  left; econstructor; split.
+  eapply exec_Iload; eauto.
+  econstructor; eauto.
+  eapply analysis_correct_1; eauto. simpl; auto.
+  unfold transfer; rewrite H.
+  eapply add_op_holds; eauto.
+  apply set_reg_lessdef; auto.
+  eapply Val.lessdef_trans; eauto.
+** (* possibly simplified *)
   destruct (reduce operation combine_op n1 op args vl) as [op' args'] eqn:?.
   exploit (reduce_lessdef_sound operation combine_op ge sp rs m (fun op vl => eval_operation ge sp op vl m)); intros;eauto.
   exploit combine_op_sound; eauto.

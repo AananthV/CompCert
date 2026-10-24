@@ -483,7 +483,7 @@ Local Open Scope string_scope.
 
 Definition transf_function (fenv: funenv) (f: function) : Errors.res function :=
   let '(R ctx s _) := expand_function fenv (inline_fuel fenv f) f initstate in
-  if zlt s.(st_stksize) Ptrofs.max_unsigned then
+  if zlt s.(st_stksize) perm_limit then
     OK (mkfunction f.(fn_sig)
                    (sregs ctx f.(fn_params))
                    s.(st_stksize)

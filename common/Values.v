@@ -1089,6 +1089,7 @@ Definition load_result (chunk: memory_chunk) (v: val) :=
   | Mint32, Vptr b ofs => if Archi.ptr64 then Vundef else Vptr b ofs
   | Mint64, Vlong n => Vlong n
   | Mint64, Vptr b ofs => if Archi.ptr64 then Vptr b ofs else Vundef
+  | Mint64u, Vlong n => Vlong n
   | Mfloat32, Vsingle f => Vsingle f
   | Mfloat64, Vfloat f => Vfloat f
   | Many32, (Vint _ | Vsingle _) => v

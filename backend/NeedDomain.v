@@ -1452,6 +1452,7 @@ Proof.
 - apply encode_val_inject. rewrite val_inject_id; auto.
 - apply encode_val_inject. rewrite val_inject_id; auto.
 - apply encode_val_inject. rewrite val_inject_id; auto.
+- apply encode_val_inject. rewrite val_inject_id; auto.
 Qed.
 
 Lemma store_argument_load_result:
