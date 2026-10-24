@@ -72,8 +72,9 @@ Progress so far:
 - [x] Unaligned 64-bit accesses and byte-load merging, `-fmerge-bytes`
   (approved memory-model change; siphash24 −21%;
   [#13](https://github.com/AananthV/CompCert/issues/13)).
-- [ ] Pure libm functions (`floor`, `sin`, `cos`; #12 phase 2): proposal not
-  yet written.
+- [x] Pure libm functions (50 functions, `-ftrust-libm`; approved trusted-base
+  change; perlin −15%; [#12](https://github.com/AananthV/CompCert/issues/12)
+  phase 2).
 - [x] Fix the Loadfwd compile-time/memory blow-up on large functions (65 GB →
   112 MB on `test/abi/layout.c`; [#19](https://github.com/AananthV/CompCert/issues/19)).
 - [ ] Reduce the remaining compile-time overhead: first round done

@@ -1,6 +1,10 @@
 Allocation.regalloc
 Archi.win64
 Axioms.proof_irr
+Builtins0.libm_d1
+Builtins0.libm_d2
+Builtins0.libm_s1
+Builtins0.libm_s2
 ClassicalDedekindReals.sig_forall_dec
 ClassicalDedekindReals.sig_not_dec
 Classical_Prop.classic

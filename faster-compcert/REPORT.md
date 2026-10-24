@@ -1392,3 +1392,43 @@ default**:
 The measurement in §22 labels "default" as the flags before this change. With
 the new defaults, the default build sits between §22's "default" and "all
 opt-in" columns.
+
+---
+
+## 24. Sixth trusted-base change: pure libm functions (issue #12, phase 2)
+
+**What it does.** Under `-ftrust-libm`, 50 libm functions are declared as
+CompCert *runtime functions*, with uninterpreted but deterministic, total and
+side-effect-free semantics (ledger entry 8). The functions are floor, ceil,
+trunc, round, sin, cos, exp, log, pow, … and their `float` versions.
+
+Upstream CompCert's CSE already shares calls to known runtime functions, with
+existing proofs, so **no new optimization proof was needed**. Calls stay real
+calls, so the ABI register clobbers are unchanged. The trusted change is about
+90 lines: `Builtins0.v`, a small `C2C.ml` change and four extraction lines.
+The axiom list gains four uninterpreted `Parameter`s.
+
+**Process.**
+- The proposal was prototyped before approval, and its load-bearing claims
+  were checked against the source (CSE's handling of runtime calls, their
+  semantics, and linking).
+- I recommended approving only the 8 `errno`-free functions first. The owner
+  chose all 50, under GCC's `-fno-math-errno` policy.
+
+**Validation.**
+- **glibc purity:** 2.4 billion calls across 4 seeds and both ifunc
+  selections. 0 result mismatches, 0 `errno` mismatches, 0 memory changes.
+- **Declaration tests:** 32 cases.
+- **Regression suite:** passes by default, with `-ftrust-libm`, and with all
+  opt-in flags.
+- **Flag off:** generated code identical.
+
+**Results** (`-ftrust-libm`, phase 2 vs phase 1, interleaved):
+- **perlin −15%**: 42.7 → 36.2 ms, now faster than gcc-O2-ccmodel (38.8 ms).
+  Its `floor` calls drop from 6 to 3.
+- No other program changes code.
+
+**Follow-ups (verified-only):**
+- LICM hoisting of these calls;
+- relaxing CSE's `kill_cheap_computations` after them, so that recomputed
+  arguments are shared.
