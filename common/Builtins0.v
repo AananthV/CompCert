@@ -353,6 +353,48 @@ Qed.
 
 End LOOKUP.
 
+(** Functions of the C library's [<math.h>], for [-ftrust-libm] *)
+
+(** [libm_d1 name x] is the result of the C library function
+  [double name(double)] applied to [x].  Likewise, [libm_d2] stands for
+  [double name(double, double)], and [libm_s1] and [libm_s2] for the
+  corresponding [float] functions.  These functions are not interpreted.
+  The only assumption is that the library function computes its result
+  from its arguments alone: it does not access memory (other than [errno],
+  which is not modelled), produces no observable event, and always returns.
+  The C front end declares a function with these semantics only under the
+  option [-ftrust-libm], which states that [errno] is not set (as with GCC's
+  [-fno-math-errno]). *)
+
+Parameter libm_d1: string -> float -> float.
+Parameter libm_d2: string -> float -> float -> float.
+Parameter libm_s1: string -> float32 -> float32.
+Parameter libm_s2: string -> float32 -> float32 -> float32.
+
+Local Open Scope string_scope.
+
+Definition libm_d1_names : list string :=
+  "floor" :: "ceil" :: "trunc" :: "round"
+  :: "sin" :: "cos" :: "tan" :: "asin" :: "acos" :: "atan"
+  :: "sinh" :: "cosh" :: "tanh"
+  :: "exp" :: "exp2" :: "expm1" :: "log" :: "log2" :: "log10" :: "log1p"
+  :: "cbrt" :: nil.
+
+Definition libm_d2_names : list string :=
+  "pow" :: "atan2" :: "fmod" :: "hypot" :: nil.
+
+Definition libm_s1_names : list string :=
+  "floorf" :: "ceilf" :: "truncf" :: "roundf"
+  :: "sinf" :: "cosf" :: "tanf" :: "asinf" :: "acosf" :: "atanf"
+  :: "sinhf" :: "coshf" :: "tanhf"
+  :: "expf" :: "exp2f" :: "expm1f" :: "logf" :: "log2f" :: "log10f" :: "log1pf"
+  :: "cbrtf" :: nil.
+
+Definition libm_s2_names : list string :=
+  "powf" :: "atan2f" :: "fmodf" :: "hypotf" :: nil.
+
+Local Close Scope string_scope.
+
 (** The standard, platform-independent built-ins *)
 
 Inductive standard_builtin : Type :=
@@ -382,11 +424,15 @@ Inductive standard_builtin : Type :=
   | BI_i64_stod
   | BI_i64_utod
   | BI_i64_stof
-  | BI_i64_utof.
+  | BI_i64_utof
+  | BI_libm_d1 (name: string)
+  | BI_libm_d2 (name: string)
+  | BI_libm_s1 (name: string)
+  | BI_libm_s2 (name: string).
 
 Definition eq_standard_builtin: forall (x y: standard_builtin), {x=y} + {x<>y}.
 Proof.
-  generalize typ_eq; decide equality.
+  generalize typ_eq string_dec; decide equality.
 Defined.
 
 Local Open Scope string_scope.
@@ -424,7 +470,10 @@ Definition standard_builtin_table : list (string * standard_builtin) :=
  :: ("__compcert_i64_utod", BI_i64_utod)
  :: ("__compcert_i64_stof", BI_i64_stof)
  :: ("__compcert_i64_utof", BI_i64_utof)
- :: nil.
+ :: map (fun s => (s, BI_libm_d1 s)) libm_d1_names
+ ++ map (fun s => (s, BI_libm_d2 s)) libm_d2_names
+ ++ map (fun s => (s, BI_libm_s1 s)) libm_s1_names
+ ++ map (fun s => (s, BI_libm_s2 s)) libm_s2_names.
 
 Definition standard_builtin_sig (b: standard_builtin) : signature :=
   match b with
@@ -457,6 +506,14 @@ Definition standard_builtin_sig (b: standard_builtin) : signature :=
       [Xlong ---> Xfloat]
   | BI_i64_stof | BI_i64_utof =>
       [Xlong ---> Xsingle]
+  | BI_libm_d1 _ =>
+      [Xfloat ---> Xfloat]
+  | BI_libm_d2 _ =>
+      [Xfloat; Xfloat ---> Xfloat]
+  | BI_libm_s1 _ =>
+      [Xsingle ---> Xsingle]
+  | BI_libm_s2 _ =>
+      [Xsingle; Xsingle ---> Xsingle]
   end.
 
 Program Definition standard_builtin_sem (b: standard_builtin) : builtin_sem (sig_res (standard_builtin_sig b)) :=
@@ -499,6 +556,10 @@ Program Definition standard_builtin_sem (b: standard_builtin) : builtin_sem (sig
   | BI_i64_utod => mkbuiltin_n1t Tlong Xfloat Float.of_longu
   | BI_i64_stof => mkbuiltin_n1t Tlong Xsingle Float32.of_long
   | BI_i64_utof => mkbuiltin_n1t Tlong Xsingle Float32.of_longu
+  | BI_libm_d1 name => mkbuiltin_n1t Tfloat Xfloat (libm_d1 name)
+  | BI_libm_d2 name => mkbuiltin_n2t Tfloat Tfloat Xfloat (libm_d2 name)
+  | BI_libm_s1 name => mkbuiltin_n1t Tsingle Xsingle (libm_s1 name)
+  | BI_libm_s2 name => mkbuiltin_n2t Tsingle Tsingle Xsingle (libm_s2 name)
   end.
 Next Obligation. 
   red. destruct vl; auto. destruct v; auto. 

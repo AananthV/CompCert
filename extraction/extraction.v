@@ -101,6 +101,12 @@ Extract Constant Compopts.optim_constprop =>
   "fun _ -> !Clflags.option_fconstprop".
 Extract Constant Compopts.optim_CSE =>
   "fun _ -> !Clflags.option_fcse".
+(* Builtins0: the C library's math functions ([-ftrust-libm]) are never
+   evaluated by the compiler, only called by the compiled code. *)
+Extract Constant Builtins0.libm_d1 => "(fun _ _ -> failwith ""Builtins0.libm_d1"")".
+Extract Constant Builtins0.libm_d2 => "(fun _ _ _ -> failwith ""Builtins0.libm_d2"")".
+Extract Constant Builtins0.libm_s1 => "(fun _ _ -> failwith ""Builtins0.libm_s1"")".
+Extract Constant Builtins0.libm_s2 => "(fun _ _ _ -> failwith ""Builtins0.libm_s2"")".
 Extract Constant Looprot.rotate_oracle => "Looprotaux.rotate_oracle".
 Extract Constant LICM.licm_oracle => "LICMaux.licm_oracle".
 Extract Constant IVwiden.iv_oracle => "IVwidenaux.iv_oracle".

@@ -206,8 +206,14 @@ Processing options:
   -ftrust-libm   Compile calls to the libm functions sqrt and fabs as the
                  builtins __builtin_fsqrt and __builtin_fabs, assuming that
                  they compute the IEEE 754 square root and absolute value.
-                 Like GCC's -fno-math-errno, errno is not set (e.g. sqrt of a
-                 negative number does not set errno to EDOM) [off]
+                 Also treat floor, ceil, trunc, round, sin, cos, tan, asin,
+                 acos, atan, sinh, cosh, tanh, exp, exp2, expm1, log, log2,
+                 log10, log1p, cbrt, pow, atan2, fmod, hypot and their float
+                 versions (floorf, ...) as pure functions of their arguments,
+                 whose calls may be shared, removed or moved.
+                 Like GCC's -fno-math-errno, errno is not set reliably by
+                 these functions (e.g. sqrt of a negative number does not set
+                 errno to EDOM) [off]
   -fzext-load    Zero-extend 8/16-bit loads and values directly to 64 bits [on]
   -fmerge-bytes  Merge 8 byte loads that form a little-endian 64-bit integer
                  into one unaligned 64-bit load (x86-64 only) [on]
