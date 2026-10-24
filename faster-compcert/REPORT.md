@@ -1309,3 +1309,56 @@ opt-in flags together.
   and pointer fragments would be overwritten.
 - A dedicated pass would need about 1,000 proof lines, for about 1.7 ms on
   siphash.
+
+---
+
+## 22. Status after all approved items, and a measurement fix (2026-10-24)
+
+**Measurement fix.**
+- **The flaw:** the first attempt at this measurement showed "all opt-in
+  flags" 11% *slower* than default on `test/c`. But 7 of the programs that
+  slowed down compile to byte-identical assembly in both configurations, and
+  the machine's load average was 12.
+- **Root cause:** `harness/bench.py` timed configurations **one after
+  another**, so a burst of load from other users landed on whichever
+  configuration was running.
+- **Fix:** `bench.py` now interleaves. For each program it runs one run of
+  each configuration per round, in rotating order, and keeps each
+  configuration's minimum. Two identical configurations now agree within
+  0.4%.
+- **Earlier numbers:** the earlier sections used the sequential harness, so
+  their small differences carry this risk. The rule of §11 (attribute timing
+  only where the assembly differs) mitigated it.
+
+**Results** (interleaved, one session; geomean run time vs CompCert 3.18;
+`all` = `-fload-op -fshift-mask -ftrust-libm -fzext-load -fmerge-bytes`):
+
+| suite | default | all opt-in | gcc -O1 | gcc-O2-ccmodel | gcc -O2 |
+|---|---:|---:|---:|---:|---:|
+| `test/c` (tuned on) | 0.842 | **0.822** | 0.891 | 0.795 | 0.785 |
+| big (held out) | 0.958 | **0.951** | 0.931 | 0.874 | 0.876 |
+| PolyBench (held out) | **0.737** | 0.739 | 0.764 | 0.651 | 0.649 |
+
+**Share of the gap to gcc-O2-ccmodel that is closed:**
+
+| suite | default | all opt-in |
+|---|---:|---:|
+| `test/c` | 75% | 86% |
+| big | 32% | 38% |
+| PolyBench | 71% | 71% |
+
+**Against gcc -O1:**
+- faster on `test/c` (−5.5% default, −7.8% all) and PolyBench (−3.6%);
+- slower on the big programs (+2-3%).
+
+**Against gcc -O2:** about 1.05-1.14× its run time.
+
+**Effect of the opt-in flags** (all vs default; only programs whose assembly
+differs):
+- **test/c:** siphash24 0.80, nbody 0.81, nsievebits 0.94, spectral 0.97.
+- **big:** raytracer 0.97.
+- **PolyBench:** gemm 0.91, lu 0.93, floyd-warshall 0.95; syrk 1.07 (the
+  `-fload-op` code-placement regression of §16).
+- **gramschmidt** measured 1.40 in the suite run but 0.94 in a dedicated
+  interleaved re-run. It is a memory-bound kernel whose times still swing
+  with other users' memory traffic.
