@@ -14,10 +14,11 @@ Geometric mean of run time relative to CompCert 3.18 (lower is better):
 | compiler | `test/c` (tuned on) | big programs (held out) | PolyBench (held out) |
 |---|---:|---:|---:|
 | CompCert 3.18 | 1.000 | 1.000 | 1.000 |
-| gcc -O1 | 0.889 | 0.951 | 0.763 |
-| **faster-compcert (this fork)** | **0.862** | **0.969** | **0.751** |
-| gcc -O2 restricted to CompCert's semantic model | 0.791 | 0.890 | 0.646 |
-| gcc -O2 | 0.783 | 0.883 | 0.670 |
+| gcc -O1 | 0.891 | 0.931 | 0.764 |
+| **faster-compcert (default flags)** | **0.842** | **0.958** | **0.737** |
+| **faster-compcert (all opt-in flags)** | **0.822** | **0.951** | **0.739** |
+| gcc -O2 restricted to CompCert's semantic model | 0.795 | 0.874 | 0.651 |
+| gcc -O2 | 0.785 | 0.876 | 0.649 |
 
 The heuristics were tuned on `test/c`, so the held-out columns are the honest
 measure of generality ([REPORT.md §7](REPORT.md#7-held-out-evaluation-issue-2)).
@@ -78,7 +79,7 @@ Known gaps and next steps are in [REPORT.md, section 5](REPORT.md#5-what-remains
   correctness theorems.
 - `results/`: the latest timings on all three suites (`final.json`,
   `heldout-big.json`, `heldout-polybench.json`), earlier rounds
-  (`round1/`, `round2/`), the phase-1 baseline (`baseline.json`), and the assumption
+  (`round1/`, `round2/`, `round3/`), the phase-1 baseline (`baseline.json`), and the assumption
   lists of CompCert 3.18 and this fork.
 
 ## Reproducing

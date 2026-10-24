@@ -2,8 +2,10 @@
 """Compile a benchmark suite with several compilers, check each program's
 result, and report the minimum wall-clock time of each program.
 
-Each run is pinned to one core.  A program is run at least N times and until
-at least 1.5s of total run time has been accumulated.
+Each run is pinned to one core.  For each program, the configs are run in
+interleaved rounds (one run of each config per round, in rotating order), so
+that load from other users of the machine affects all configs alike.  Rounds
+continue until every config has at least N runs and 1.5s of total run time.
 
 Suites: `c` (test/c, the default), `big` (raytracer, spass, compression) and
 `polybench` (PolyBench/C 4.2.1, see fetch_polybench.sh); see suites.py.
@@ -45,22 +47,38 @@ def test_c():
             for p in PROGS]
 
 
-def run(bench, exe, workdir, n, core):
-    best, total, k = float('inf'), 0.0, 0
-    while k < n or total < 1.5:
-        outs = []
-        t = time.perf_counter()
-        for argv, stdin, cwd in bench.steps(exe, workdir):
-            with open(stdin, 'rb') if stdin else open(os.devnull, 'rb') as f:
-                r = subprocess.run(['taskset', '-c', str(core)] + argv, stdin=f,
-                                   capture_output=True, cwd=cwd)
-            if r.returncode:
-                return None
-            outs.append(r.stdout)
-        dt = time.perf_counter() - t
-        if not bench.check(workdir, outs):
+def run_once(bench, exe, workdir, core):
+    """One timed run of a program; None if it fails or its result is wrong."""
+    outs = []
+    t = time.perf_counter()
+    for argv, stdin, cwd in bench.steps(exe, workdir):
+        with open(stdin, 'rb') if stdin else open(os.devnull, 'rb') as f:
+            r = subprocess.run(['taskset', '-c', str(core)] + argv, stdin=f,
+                               capture_output=True, cwd=cwd)
+        if r.returncode:
             return None
-        best, total, k = min(best, dt), total + dt, k + 1
+        outs.append(r.stdout)
+    dt = time.perf_counter() - t
+    return dt if bench.check(workdir, outs) else None
+
+
+def run_interleaved(bench, exes, n, core):
+    """Minimum run time of each config, timed in interleaved rounds.
+    exes: {config: (exe, workdir)}.  A config whose run fails gets None."""
+    best = {c: float('inf') for c in exes}
+    total = {c: 0.0 for c in exes}
+    alive = list(exes)
+    k = 0
+    while alive and (k < n or any(total[c] < 1.5 for c in alive)):
+        order = alive[k % len(alive):] + alive[:k % len(alive)]
+        for c in order:
+            dt = run_once(bench, exes[c][0], exes[c][1], core)
+            if dt is None:
+                best[c] = None
+                alive.remove(c)
+                continue
+            best[c], total[c] = min(best[c], dt), total[c] + dt
+        k += 1
     return best
 
 
@@ -85,19 +103,19 @@ def main():
     if a.progs:
         wanted = a.progs.split(',')
         benches = [b for b in benches if b.name in wanted]
-    res = {}
-    for c in a.configs:
-        res[c] = {}
-        for b in benches:
+    res = {c: {} for c in a.configs}
+    for b in benches:
+        exes = {}
+        for c in a.configs:
             workdir = os.path.join(a.out, a.suite, c)
             os.makedirs(workdir, exist_ok=True)
             try:
-                exe = b.build(CONFIGS[c], workdir)
+                exes[c] = (b.build(CONFIGS[c], workdir), workdir)
             except RuntimeError as e:
                 print(f'[{c}] {e}', file=sys.stderr)
                 res[c][b.name] = None
-                continue
-            res[c][b.name] = run(b, exe, workdir, a.n, a.core)
+        for c, t in run_interleaved(b, exes, a.n, a.core).items():
+            res[c][b.name] = t
     print(json.dumps(res, indent=1))
 
 
