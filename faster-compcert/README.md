@@ -15,7 +15,7 @@ Geometric mean of run time relative to CompCert 3.18 (lower is better):
 |---|---:|---:|---:|
 | CompCert 3.18 | 1.000 | 1.000 | 1.000 |
 | gcc -O1 | 0.891 | 0.931 | 0.764 |
-| **faster-compcert (default flags)** | **0.842** | **0.958** | **0.737** |
+| **faster-compcert (default flags, before 2026-10-24)** | **0.842** | **0.958** | **0.737** |
 | **faster-compcert (all opt-in flags)** | **0.822** | **0.951** | **0.739** |
 | gcc -O2 restricted to CompCert's semantic model | 0.795 | 0.874 | 0.651 |
 | gcc -O2 | 0.785 | 0.876 | 0.649 |
@@ -34,11 +34,11 @@ Changes, each fully proved:
 | new pass `IVwiden`: induction-variable widening and strength reduction, validated (#4) | `-fiv-widen` | gemm 0.74x, sha1 0.87x, syrk 0.87x |
 | new passes `Looprot` + `LICM`: validated loop rotation and loop-invariant code motion, including chains of dependent operations (#16) | `-floop-rotate`, `-flicm` | aes, sha1, fannkuch; gemm 0.72x, syrk 0.73x, floyd-warshall 0.74x |
 | new pass `Loadop`: x86 arithmetic with memory operands (#5; **trusted-base change**, see [TRUSTED_BASE.md](TRUSTED_BASE.md)) | `-fload-op` (off by default) | gemm 0.91x, nbody 0.96x, spectral 0.97x |
-| x86 shift-count masking in the Asm model, plus masked-shift selection (#11; **trusted-base change**) | `-fshift-mask` (off by default) | nsievebits 0.94x |
+| x86 shift-count masking in the Asm model, plus masked-shift selection (#11; **trusted-base change**) | `-fshift-mask` (on by default) | nsievebits 0.94x |
 | new pass `Tailacc` (accumulator tail recursion) + bounded recursive inlining (#8) | `-ftail-acc`, `-finline-recursive-depth N` | fib 0.54x (narrow: fib only) |
 | `sqrt`/`fabs` calls become exact builtins (#12 phase 1; **trusted-base change**) | `-ftrust-libm` (off by default) | nbody 0.83x |
-| zero-extending 8/16-bit loads with 64-bit results (#25; **trusted-base change**) | `-fzext-load` (off by default) | siphash24 0.94x |
-| bounded permissions in the memory model + unaligned 64-bit chunk; byte-load merging (#13; **trusted-base change**) | `-fmerge-bytes` (off by default) | siphash24 0.79x, sha3 0.98x |
+| zero-extending 8/16-bit loads with 64-bit results (#25; **trusted-base change**) | `-fzext-load` (on by default) | siphash24 0.94x |
+| bounded permissions in the memory model + unaligned 64-bit chunk; byte-load merging (#13; **trusted-base change**) | `-fmerge-bytes` (on by default) | siphash24 0.79x, sha3 0.98x |
 
 Verification:
 
