@@ -296,4 +296,114 @@ Definition addr_deltas (addr1: addressing) (vl1: list valnum)
     end
   else nil.
 
+
+(** Merging of byte loads (option [-fmerge-bytes]).  We recognize, through
+  the value numbering, a 64-bit OR of zero-extended byte loads
+  [(u64)p[o] | (u64)p[o+1] << 8 | ... | (u64)p[o+7] << 56], in any
+  association order, possibly with 32-bit partial results
+  ([p[o] | p[o+1] << 8 | ...]) zero-extended to 64 bits.  It is replaced
+  by a single unaligned 64-bit load [Mint64u] at [p + o].
+
+  A [bytecomp] describes a value that is the OR of bytes loaded from
+  [base + ofs], each shifted left by [pos] bits, as a 32-bit or a 64-bit
+  integer. *)
+
+Record bytecomp : Type := mkbytecomp {
+  bc64: bool;                    (**r 64-bit result? *)
+  bcbase: valnum;                (**r base address *)
+  bcbytes: list (Z * Z)          (**r (offset, bit position) of each byte *)
+}.
+
+Definition bytes_fit (w: Z) (l: list (Z * Z)) : bool :=
+  forallb (fun p => zle 0 (snd p) && zle (snd p + 8) w) l.
+
+Definition bytes_shift (n: Z) (l: list (Z * Z)) : list (Z * Z) :=
+  map (fun p => (fst p, snd p + n)) l.
+
+Definition bytecomp_widen (oc: option bytecomp) (w: Z) : option bytecomp :=
+  match oc with
+  | Some c => if negb (bc64 c) && bytes_fit w (bcbytes c)
+              then Some (mkbytecomp true (bcbase c) (bcbytes c)) else None
+  | None => None
+  end.
+
+Definition bytecomp_shl (oc: option bytecomp) (is64 res64: bool) (n: Int.int) : option bytecomp :=
+  match oc with
+  | Some c =>
+      let l := bytes_shift (Int.unsigned n) (bcbytes c) in
+      if Bool.eqb (bc64 c) is64 && bytes_fit (if is64 then 64 else 32) l
+      then Some (mkbytecomp res64 (bcbase c) l) else None
+  | None => None
+  end.
+
+Definition bytecomp_or (oc1 oc2: option bytecomp) (is64: bool) : option bytecomp :=
+  match oc1, oc2 with
+  | Some c1, Some c2 =>
+      if Bool.eqb (bc64 c1) is64 && Bool.eqb (bc64 c2) is64 && peq (bcbase c1) (bcbase c2)
+      then Some (mkbytecomp is64 (bcbase c1) (bcbytes c1 ++ bcbytes c2)) else None
+  | _, _ => None
+  end.
+
+Definition bytecomp_op (rec: valnum -> option bytecomp)
+                       (op: operation) (args: list valnum) : option bytecomp :=
+  match op, args with
+  | Ocast32unsigned, x :: nil => bytecomp_widen (rec x) 32
+  | Ozextb64, x :: nil => bytecomp_widen (rec x) 8
+  | Ozextb64_ld, _ :: x :: nil => bytecomp_widen (rec x) 8
+  | Oshlimm n, x :: nil =>
+      if Int.ltu n Int.iwordsize then bytecomp_shl (rec x) false false n else None
+  | Ozextshlimm n, x :: nil =>
+      if Int.ltu n Int.iwordsize then bytecomp_shl (rec x) false true n else None
+  | Oshllimm n, x :: nil =>
+      if Int.ltu n Int64.iwordsize' then bytecomp_shl (rec x) true true n else None
+  | Oor, x :: y :: nil => bytecomp_or (rec x) (rec y) false
+  | Oorl, x :: y :: nil => bytecomp_or (rec x) (rec y) true
+  | _, _ => None
+  end.
+
+Fixpoint bytecomp_of (fuel: nat) (v: valnum) : option bytecomp :=
+  match fuel with
+  | O => None
+  | S fuel' =>
+      match get v with
+      | Some (Load Mint8unsigned (Aindexed ofs) (b :: nil) _) =>
+          Some (mkbytecomp false b ((ofs, 0) :: nil))
+      | Some (Op op args) => bytecomp_op (bytecomp_of fuel') op args
+      | _ => None
+      end
+  end.
+
+(** The 8 bytes [o, ..., o+7] at bit positions [0, 8, ..., 56]. *)
+
+Definition bytes_le64 (o: Z) : list (Z * Z) :=
+  (o, 0) :: (o + 1, 8) :: (o + 2, 16) :: (o + 3, 24) ::
+  (o + 4, 32) :: (o + 5, 40) :: (o + 6, 48) :: (o + 7, 56) :: nil.
+
+Definition pair_eq (p q: Z * Z) : {p = q} + {p <> q}.
+Proof. decide equality; apply Z.eq_dec. Defined.
+
+Definition bytes_incl (l1 l2: list (Z * Z)) : bool :=
+  forallb (fun p => if In_dec pair_eq p l2 then true else false) l1.
+
+Definition combine_merge_load (op: operation) (args: list valnum)
+                               : option (addressing * list valnum) :=
+  if Archi.ptr64 then
+    match op with
+    | Oorl =>
+        match bytecomp_op (bytecomp_of 12%nat) op args with
+        | Some c =>
+            match find (fun p => zeq (snd p) 0) (bcbytes c) with
+            | Some (o, _) =>
+                if bc64 c && bytes_incl (bcbytes c) (bytes_le64 o)
+                          && bytes_incl (bytes_le64 o) (bcbytes c)
+                then Some (Aindexed o, bcbase c :: nil)
+                else None
+            | None => None
+            end
+        | None => None
+        end
+    | _ => None
+    end
+  else None.
+
 End COMBINE.

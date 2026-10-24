@@ -203,6 +203,7 @@ Inductive memory_chunk : Type :=
   | Mint16unsigned  (**r 16-bit unsigned integer *)
   | Mint32          (**r 32-bit integer, or pointer *)
   | Mint64          (**r 64-bit integer *)
+  | Mint64u         (**r 64-bit integer, no alignment requirement *)
   | Mfloat32        (**r 32-bit single-precision float *)
   | Mfloat64        (**r 64-bit double-precision float *)
   | Many32          (**r any value that fits in 32 bits *)
@@ -225,6 +226,7 @@ Definition type_of_chunk (c: memory_chunk) : typ :=
   | Mint16unsigned => Tint
   | Mint32 => Tint
   | Mint64 => Tlong
+  | Mint64u => Tlong
   | Mfloat32 => Tsingle
   | Mfloat64 => Tfloat
   | Many32 => Tany32
@@ -245,6 +247,7 @@ Definition xtype_of_chunk (c: memory_chunk) : xtype :=
   | Mint16unsigned => Xint16unsigned
   | Mint32 => Xint
   | Mint64 => Xlong
+  | Mint64u => Xlong
   | Mfloat32 => Xsingle
   | Mfloat64 => Xfloat
   | Many32 => Xany32

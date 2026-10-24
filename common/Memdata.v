@@ -36,6 +36,7 @@ Definition size_chunk (chunk: memory_chunk) : Z :=
   | Mint16unsigned => 2
   | Mint32 => 4
   | Mint64 => 8
+  | Mint64u => 8
   | Mfloat32 => 4
   | Mfloat64 => 8
   | Many32 => 4
@@ -94,6 +95,7 @@ Definition align_chunk (chunk: memory_chunk) : Z :=
   | Mint16unsigned => 2
   | Mint32 => 4
   | Mint64 => Archi.align_int64
+  | Mint64u => 1
   | Mfloat32 => 4
   | Mfloat64 => Archi.align_float64
   | Many32 => 4
@@ -426,6 +428,7 @@ Definition encode_val (chunk: memory_chunk) (v: val) : list memval :=
   | Vint n, Mint32 => inj_bytes (encode_int 4%nat (Int.unsigned n))
   | Vptr b ofs, Mint32 => if Archi.ptr64 then List.repeat Undef 4%nat else inj_value Q32 v
   | Vlong n, Mint64 => inj_bytes (encode_int 8%nat (Int64.unsigned n))
+  | Vlong n, Mint64u => inj_bytes (encode_int 8%nat (Int64.unsigned n))
   | Vptr b ofs, Mint64 => if Archi.ptr64 then inj_value Q64 v else List.repeat Undef 8%nat
   | Vsingle n, Mfloat32 => inj_bytes (encode_int 4%nat (Int.unsigned (Float32.to_bits n)))
   | Vfloat n, Mfloat64 => inj_bytes (encode_int 8%nat (Int64.unsigned (Float.to_bits n)))
@@ -445,6 +448,7 @@ Definition decode_val (chunk: memory_chunk) (vl: list memval) : val :=
       | Mint16unsigned => Vint(Int.zero_ext 16 (Int.repr (decode_int bl)))
       | Mint32 => Vint(Int.repr(decode_int bl))
       | Mint64 => Vlong(Int64.repr(decode_int bl))
+      | Mint64u => Vlong(Int64.repr(decode_int bl))
       | Mfloat32 => Vsingle(Float32.of_bits (Int.repr (decode_int bl)))
       | Mfloat64 => Vfloat(Float.of_bits (Int64.repr (decode_int bl)))
       | Many32 => Vundef
@@ -522,14 +526,14 @@ Definition decode_encode_val (v1: val) (chunk1 chunk2: memory_chunk) (v2: val) :
   | Vint n, Many32, Many32 => v2 = Vint n
   | Vint n, Mint32, Mfloat32 => v2 = Vsingle(Float32.of_bits n)
   | Vint n, Many64, Many64 => v2 = Vint n
-  | Vint n, (Mint64 | Mfloat32 | Mfloat64 | Many64), _ => v2 = Vundef
+  | Vint n, (Mint64 | Mint64u | Mfloat32 | Mfloat64 | Many64), _ => v2 = Vundef
   | Vint n, _, _ => True (**r nothing meaningful to say about v2 *)
   | Vptr b ofs, (Mint32 | Many32), (Mint32 | Many32) => v2 = if Archi.ptr64 then Vundef else Vptr b ofs
   | Vptr b ofs, Mint64, (Mint64 | Many64) => v2 = if Archi.ptr64 then Vptr b ofs else Vundef
   | Vptr b ofs, Many64, Many64 => v2 = Vptr b ofs
   | Vptr b ofs, Many64, Mint64 => v2 = if Archi.ptr64 then Vptr b ofs else Vundef
   | Vptr b ofs, _, _ => v2 = Vundef
-  | Vlong n, Mint64, Mint64 => v2 = Vlong n
+  | Vlong n, (Mint64 | Mint64u), (Mint64 | Mint64u) => v2 = Vlong n
   | Vlong n, Mint64, Mfloat64 => v2 = Vfloat(Float.of_bits n)
   | Vlong n, Many64, Many64 => v2 = Vlong n
   | Vlong n, (Mbool|Mint8signed|Mint8unsigned|Mint16signed|Mint16unsigned|Mint32|Mfloat32|Mfloat64|Many32), _ => v2 = Vundef
@@ -537,13 +541,13 @@ Definition decode_encode_val (v1: val) (chunk1 chunk2: memory_chunk) (v2: val) :
   | Vfloat f, Mfloat64, Mfloat64 => v2 = Vfloat f
   | Vfloat f, Mfloat64, Mint64 => v2 = Vlong(Float.to_bits f)
   | Vfloat f, Many64, Many64 => v2 = Vfloat f
-  | Vfloat f, (Mbool|Mint8signed|Mint8unsigned|Mint16signed|Mint16unsigned|Mint32|Mfloat32|Mint64|Many32), _ => v2 = Vundef
+  | Vfloat f, (Mbool|Mint8signed|Mint8unsigned|Mint16signed|Mint16unsigned|Mint32|Mfloat32|Mint64|Mint64u|Many32), _ => v2 = Vundef
   | Vfloat f, _, _ => True   (* nothing interesting to say about v2 *)
   | Vsingle f, Mfloat32, Mfloat32 => v2 = Vsingle f
   | Vsingle f, Mfloat32, Mint32 => v2 = Vint(Float32.to_bits f)
   | Vsingle f, Many32, Many32 => v2 = Vsingle f
   | Vsingle f, Many64, Many64 => v2 = Vsingle f
-  | Vsingle f, (Mbool|Mint8signed|Mint8unsigned|Mint16signed|Mint16unsigned|Mint32|Mint64|Mfloat64|Many64), _ => v2 = Vundef
+  | Vsingle f, (Mbool|Mint8signed|Mint8unsigned|Mint16signed|Mint16unsigned|Mint32|Mint64|Mint64u|Mfloat64|Many64), _ => v2 = Vundef
   | Vsingle f, _, _ => True (* nothing interesting to say about v2 *)
   end.
 
@@ -592,12 +596,14 @@ Lemma decode_encode_val_similar:
   forall v1 chunk1 chunk2 v2,
   type_of_chunk chunk1 = type_of_chunk chunk2 ->
   size_chunk chunk1 = size_chunk chunk2 ->
+  align_chunk chunk2 <= align_chunk chunk1 ->
   decode_encode_val v1 chunk1 chunk2 v2 ->
   v2 = Val.load_result chunk2 v1.
 Proof.
-  intros until v2; intros TY SZ DE.
+  intros until v2; intros TY SZ AL DE.
   unfold decode_encode_val in DE; destruct chunk1; destruct chunk2;
   simpl in TY; try discriminate; simpl in SZ; try extlia;
+  try (simpl in AL; unfold Archi.align_int64 in AL; extlia);
   destruct v1; auto.
 Qed.
 

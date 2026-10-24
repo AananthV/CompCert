@@ -462,7 +462,7 @@ Inductive match_stacks (F: meminj) (m m': mem):
         (AG: agree_regs F ctx rs rs')
         (SP: F sp = Some(sp', ctx.(dstk)))
         (PRIV: range_private F m m' sp' (ctx.(dstk) + ctx.(mstk)) f'.(fn_stacksize))
-        (SSZ1: 0 <= f'.(fn_stacksize) < Ptrofs.max_unsigned)
+        (SSZ1: 0 <= f'.(fn_stacksize) < perm_limit)
         (SSZ2: forall ofs, Mem.perm m' sp' ofs Max Nonempty -> 0 <= ofs <= f'.(fn_stacksize))
         (RES: Ple res ctx.(mreg))
         (BELOW: Plt sp' bound),
@@ -473,7 +473,7 @@ Inductive match_stacks (F: meminj) (m m': mem):
   | match_stacks_untailcall: forall stk res f' sp' rpc rs' stk' bound ctx
         (MS: match_stacks_inside F m m' stk stk' f' ctx sp' rs')
         (PRIV: range_private F m m' sp' ctx.(dstk) f'.(fn_stacksize))
-        (SSZ1: 0 <= f'.(fn_stacksize) < Ptrofs.max_unsigned)
+        (SSZ1: 0 <= f'.(fn_stacksize) < perm_limit)
         (SSZ2: forall ofs, Mem.perm m' sp' ofs Max Nonempty -> 0 <= ofs <= f'.(fn_stacksize))
         (RET: ctx.(retinfo) = Some (rpc, res))
         (BELOW: Plt sp' bound),
@@ -810,7 +810,7 @@ Inductive match_states: RTL.state -> RTL.state -> Prop :=
         (MINJ: Mem.inject F m m')
         (VB: Mem.valid_block m' sp')
         (PRIV: range_private F m m' sp' (ctx.(dstk) + ctx.(mstk)) f'.(fn_stacksize))
-        (SSZ1: 0 <= f'.(fn_stacksize) < Ptrofs.max_unsigned)
+        (SSZ1: 0 <= f'.(fn_stacksize) < perm_limit)
         (SSZ2: forall ofs, Mem.perm m' sp' ofs Max Nonempty -> 0 <= ofs <= f'.(fn_stacksize)),
       match_states (State stk f (Vptr sp Ptrofs.zero) pc rs m)
                    (State stk' f' (Vptr sp' Ptrofs.zero) (spc ctx pc) rs' m')
@@ -833,7 +833,7 @@ Inductive match_states: RTL.state -> RTL.state -> Prop :=
         (MINJ: Mem.inject F m m')
         (VB: Mem.valid_block m' sp')
         (PRIV: range_private F m m' sp' ctx.(dstk) f'.(fn_stacksize))
-        (SSZ1: 0 <= f'.(fn_stacksize) < Ptrofs.max_unsigned)
+        (SSZ1: 0 <= f'.(fn_stacksize) < perm_limit)
         (SSZ2: forall ofs, Mem.perm m' sp' ofs Max Nonempty -> 0 <= ofs <= f'.(fn_stacksize)),
       match_states (Callstate stk (Internal f) vargs m)
                    (State stk' f' (Vptr sp' Ptrofs.zero) pc' rs' m')
@@ -851,7 +851,7 @@ Inductive match_states: RTL.state -> RTL.state -> Prop :=
         (MINJ: Mem.inject F m m')
         (VB: Mem.valid_block m' sp')
         (PRIV: range_private F m m' sp' ctx.(dstk) f'.(fn_stacksize))
-        (SSZ1: 0 <= f'.(fn_stacksize) < Ptrofs.max_unsigned)
+        (SSZ1: 0 <= f'.(fn_stacksize) < perm_limit)
         (SSZ2: forall ofs, Mem.perm m' sp' ofs Max Nonempty -> 0 <= ofs <= f'.(fn_stacksize)),
       match_states (Returnstate stk v m)
                    (State stk' f' (Vptr sp' Ptrofs.zero) pc' rs' m').
@@ -1125,7 +1125,7 @@ Proof.
   rewrite H6. apply agree_regs_init_regs. eauto. auto. inv H2; auto. congruence. auto.
   eapply Mem.valid_new_block; eauto.
   red; intros. split.
-  eapply Mem.perm_alloc_2; eauto. inv H2; extlia.
+  eapply Mem.perm_alloc_2; eauto; inv H2; extlia.
   intros; red; intros. exploit Mem.perm_alloc_inv. eexact H0. eauto.
   destruct (eq_block b stk); intros.
   subst. rewrite D in H10; inv H10. inv H2; extlia.
@@ -1141,11 +1141,11 @@ Proof.
     (* sp' is valid *)
     instantiate (1 := sp'). auto.
     (* offset is representable *)
-    instantiate (1 := dstk ctx). generalize (Z.le_max_r (fn_stacksize f) 0). lia.
+    instantiate (1 := dstk ctx). generalize (Z.le_max_r (fn_stacksize f) 0) perm_limit_max. lia.
     (* negative offsets are not revealed *)
     right; lia.
     (* size of target block is representable *)
-    intros. right. exploit SSZ2; eauto with mem. inv FB; lia.
+    intros. right. exploit SSZ2; eauto with mem. inv FB; generalize perm_limit_max; lia.
     (* we have full permissions on sp' at and above dstk ctx *)
     intros. apply Mem.perm_cur. apply Mem.perm_implies with Freeable; auto with mem.
     eapply range_private_perms; eauto. extlia.

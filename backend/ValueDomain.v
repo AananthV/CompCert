@@ -3381,6 +3381,8 @@ Definition vnormalize (chunk: memory_chunk) (v: aval) :=
   | Mint64, L _ => v
   | Mint64, (Ptr p | Ifptr p) => if Archi.ptr64 then v else Num (provenance v)
   | Mint64, _ => Num (provenance v)
+  | Mint64u, L _ => v
+  | Mint64u, _ => Num (provenance v)
   | Mfloat32, FS f => v
   | Mfloat32, _ => Num (provenance v)
   | Mfloat64, F f => v
@@ -3442,6 +3444,8 @@ Proof.
   red in H1. destruct Archi.ptr64; auto. destruct v; constructor || discriminate.
 - (* int64 *)
   red in H1. destruct Archi.ptr64; auto. destruct v; constructor || discriminate.
+- (* int64u *)
+  destruct v; try contradiction; simpl; [apply vmatch_num_undef | apply vmatch_num_l | exploit Mem.load_result; eauto; unfold decode_val; destruct proj_bytes; intros; discriminate].
 - (* float32 *)
   destruct v; try contradiction; constructor.
 - (* float64 *)

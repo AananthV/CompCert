@@ -13,7 +13,7 @@
 (** Layout of activation records; translation from Linear to Mach. *)
 
 Require Import Coqlib Errors.
-Require Import Integers AST.
+Require Import Integers AST Memory.
 Require Import Op Locations Linear Mach.
 Require Import Bounds Conventions Stacklayout Lineartyping.
 
@@ -205,7 +205,7 @@ Definition transf_function (f: Linear.function) : res Mach.function :=
   let fe := make_env (function_bounds f) in
   if negb (wt_function f) then
     Error (msg "Ill-formed Linear code")
-  else if zlt Ptrofs.max_unsigned fe.(fe_size) then
+  else if zlt perm_limit fe.(fe_size) then
     Error (msg "Too many spilled variables, stack size exceeded")
   else
     OK (Mach.mkfunction

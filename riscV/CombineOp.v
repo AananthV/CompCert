@@ -156,3 +156,8 @@ End COMBINE.
 Definition addr_deltas (get: valnum -> option rhs)
                        (addr1: addressing) (vl1: list valnum)
                        (addr2: addressing) (vl2: list valnum) : list Z := nil.
+
+(** Merging of byte loads ([-fmerge-bytes]) is only implemented for x86-64. *)
+
+Definition combine_merge_load (get: valnum -> option rhs) (op: operation) (args: list valnum)
+                              : option (addressing * list valnum) := None.

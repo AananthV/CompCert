@@ -18,6 +18,7 @@ Require Import AST Linking Builtins.
 Require Import Values Memory Events.
 Require Import Op Registers RTL.
 Require Import ValueDomain ValueAnalysis CSEdomain CombineOp.
+Require Compopts.
 
 (** The idea behind value numbering algorithms is to associate
   abstract identifiers (``value numbers'') to the contents of registers
@@ -671,6 +672,23 @@ Definition analyze (f: RTL.function) (dm: defmap) (approx: PMap.t VA.t): option 
   worth reusing their results.  These operations are detected by the
   function [is_trivial_op] in module [Op]. *)
 
+(** With [-fmerge-bytes], an operation that combines byte loads into a
+  64-bit integer can be replaced by a single unaligned 64-bit load
+  (see [CombineOp.combine_merge_load]). *)
+
+Definition merge_load (n: numbering) (op: operation) (vl: list valnum)
+                      : option (addressing * list reg) :=
+  if Compopts.optim_mergebytes tt then
+    match combine_merge_load (fun v => find_valnum_num v n.(num_eqs)) op vl with
+    | Some (addr, vl') =>
+        match regs_valnums n vl' with
+        | Some rl => Some (addr, rl)
+        | None => None
+        end
+    | None => None
+    end
+  else None.
+
 Definition transf_instr (dm: defmap) (n: numbering) (instr: instruction) :=
   match instr with
   | Iop op args res s =>
@@ -680,8 +698,12 @@ Definition transf_instr (dm: defmap) (n: numbering) (instr: instruction) :=
         | Some r =>
             Iop Omove (r :: nil) res s
         | None =>
-            let (op', args') := reduce _ combine_op n1 op args vl in
-            Iop op' args' res s
+            match merge_load n1 op vl with
+            | Some (addr, rl) => Iload Mint64u addr rl res s
+            | None =>
+                let (op', args') := reduce _ combine_op n1 op args vl in
+                Iop op' args' res s
+            end
         end
   | Iload chunk addr args dst s =>
       let (n1, vl) := valnum_regs n args in

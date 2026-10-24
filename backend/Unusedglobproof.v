@@ -1210,8 +1210,8 @@ Proof.
   assert (P: (prog_defmap tp)!id = Some (Gvar v)).
   { eapply prog_defmap_norepet; eauto. eapply match_prog_unique; eauto. }
   rewrite (match_prog_def _ _ _ TRANSF) in P. destruct (IS.mem id used) eqn:U; try discriminate.
-  exploit Genv.init_mem_inversion; eauto. apply in_prog_defmap; eauto. intros [AL FV].
-  split. auto.
+  exploit Genv.init_mem_inversion; eauto. apply in_prog_defmap; eauto. intros [AL [SZ FV]].
+  split. auto. split. auto.
   intros. exploit FV; eauto. intros (b & FS).
   apply transform_find_symbol_1 with b; auto.
   apply kept_closed with id (Gvar v).

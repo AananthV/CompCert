@@ -780,6 +780,7 @@ Proof.
   destruct (peq id0 id). inv H2.
   eapply Mem.load_alloc_same'; eauto.
   lia. rewrite Z.add_0_l. eapply sizeof_by_value; eauto.
+  rewrite Z.add_0_l. generalize perm_limit_large; destruct chunk; simpl; lia.
   apply Z.divide_0_r.
   eapply Mem.load_alloc_other; eauto.
 Qed.

@@ -76,7 +76,7 @@ Lemma sig_preserved:
 Proof.
   intros until tf; destruct f; simpl.
   unfold transl_function. destruct (build_compilenv f).
-  case (zle z Ptrofs.max_unsigned); simpl bind; try congruence.
+  case (zle z perm_limit); simpl bind; try congruence.
   intros. monadInv H. simpl. eapply sig_preserved_body; eauto.
   intro. inv H. reflexivity.
 Qed.
@@ -652,11 +652,12 @@ Lemma match_callstack_alloc_right:
   Mem.inject f m tm ->
   match_temps f le te ->
   (forall id, cenv!id = None) ->
+  tf.(fn_stackspace) <= perm_limit ->
   match_callstack f m tm'
       (Frame cenv tf empty_env le te sp (Mem.nextblock m) (Mem.nextblock m) :: cs)
       (Mem.nextblock m) (Mem.nextblock tm').
 Proof.
-  intros.
+  intros until 5. intros SZ.
   exploit Mem.nextblock_alloc; eauto. intros NEXTBLOCK.
   exploit Mem.alloc_result; eauto. intros RES.
   constructor.
@@ -670,7 +671,7 @@ Proof.
     eelim Mem.fresh_block_alloc; eauto. eapply Mem.valid_block_inject_2; eauto.
     rewrite RES. change (Mem.valid_block tm tb). eapply Mem.valid_block_inject_2; eauto.
   red; intros. rewrite PTree.gempty in H4. discriminate.
-  red; intros. left. eapply Mem.perm_alloc_2; eauto.
+  red; intros. left. eapply Mem.perm_alloc_2; eauto. lia.
   eapply match_callstack_invariant with (tm1 := tm); eauto.
   rewrite RES; auto.
   intros. eapply Mem.perm_alloc_1; eauto.
@@ -771,7 +772,7 @@ Definition cenv_mem_separated (cenv: compilenv) (vars: list (ident * Z)) (f: mem
 Lemma match_callstack_alloc_variables_rec:
   forall tm sp tf cenv le te lo cs,
   Mem.valid_block tm sp ->
-  fn_stackspace tf <= Ptrofs.max_unsigned ->
+  fn_stackspace tf <= perm_limit ->
   (forall ofs k p, Mem.perm tm sp ofs k p -> 0 <= ofs < fn_stackspace tf) ->
   (forall ofs k p, 0 <= ofs < fn_stackspace tf -> Mem.perm tm sp ofs k p) ->
   forall e1 m1 vars e2 m2,
@@ -803,9 +804,9 @@ Proof.
     eexact MINJ.
     eexact H.
     eexact VALID.
-    instantiate (1 := ofs). lia.
+    instantiate (1 := ofs). generalize perm_limit_max; lia.
     right; lia.
-    intros. exploit STKSIZE; eauto. lia.
+    intros. exploit STKSIZE; eauto. generalize perm_limit_max; lia.
     intros. apply STKPERMS. lia.
     replace (sz - 0) with sz by lia. auto.
     intros. eapply SEP2. eauto with coqlib. eexact CENV. eauto. eauto. lia.
@@ -830,7 +831,7 @@ Qed.
 Lemma match_callstack_alloc_variables:
   forall tm1 sp tm2 m1 vars e m2 cenv f1 cs fn le te,
   Mem.alloc tm1 0 (fn_stackspace fn) = (tm2, sp) ->
-  fn_stackspace fn <= Ptrofs.max_unsigned ->
+  fn_stackspace fn <= perm_limit ->
   alloc_variables empty_env m1 vars e m2 ->
   list_norepet (map fst vars) ->
   cenv_compat cenv vars (fn_stackspace fn) ->
@@ -848,7 +849,7 @@ Proof.
   eapply match_callstack_alloc_variables_rec; eauto.
   eapply Mem.valid_new_block; eauto.
   intros. eapply Mem.perm_alloc_3; eauto.
-  intros. apply Mem.perm_implies with Freeable; auto with mem. eapply Mem.perm_alloc_2; eauto.
+  intros. apply Mem.perm_implies with Freeable; auto with mem. eapply Mem.perm_alloc_2; eauto; lia.
   instantiate (1 := f1). red; intros. eelim Mem.fresh_block_alloc; eauto.
   eapply Mem.valid_block_inject_2; eauto.
   eapply match_callstack_alloc_right; eauto.
@@ -1177,7 +1178,7 @@ Qed.
 Theorem match_callstack_function_entry:
   forall fn cenv tf m e m' tm tm' sp f cs args targs le,
   build_compilenv fn = (cenv, tf.(fn_stackspace)) ->
-  tf.(fn_stackspace) <= Ptrofs.max_unsigned ->
+  tf.(fn_stackspace) <= perm_limit ->
   list_norepet (map fst (Csharpminor.fn_vars fn)) ->
   list_norepet (Csharpminor.fn_params fn) ->
   list_disjoint (Csharpminor.fn_params fn) (Csharpminor.fn_temps fn) ->
@@ -2098,7 +2099,7 @@ Opaque PTree.set.
 (* internal call *)
   monadInv TR. generalize EQ; clear EQ; unfold transl_function.
   caseEq (build_compilenv f). intros ce sz BC.
-  destruct (zle sz Ptrofs.max_unsigned); try congruence.
+  destruct (zle sz perm_limit); try congruence.
   intro TRBODY.
   generalize TRBODY; intro TMP. monadInv TMP.
   set (tf := mkfunction (Csharpminor.fn_sig f)

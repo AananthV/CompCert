@@ -107,7 +107,7 @@ Lemma unfold_transf_function:
 Proof.
   generalize TRANSF_F. unfold transf_function.
   destruct (wt_function f); simpl negb.
-  destruct (zlt Ptrofs.max_unsigned (fe_size (make_env (function_bounds f)))).
+  destruct (zlt perm_limit (fe_size (make_env (function_bounds f)))).
   intros; discriminate.
   intros. unfold fe. unfold b. congruence.
   intros; discriminate.
@@ -120,14 +120,19 @@ Proof.
   destruct (wt_function f); simpl negb. auto. intros; discriminate.
 Qed.
 
-Lemma size_no_overflow: fe.(fe_size) <= Ptrofs.max_unsigned.
+Lemma size_within_limit: fe.(fe_size) <= perm_limit.
 Proof.
   generalize TRANSF_F. unfold transf_function.
   destruct (wt_function f); simpl negb.
-  destruct (zlt Ptrofs.max_unsigned (fe_size (make_env (function_bounds f)))).
+  destruct (zlt perm_limit (fe_size (make_env (function_bounds f)))).
   intros; discriminate.
   intros. unfold fe. unfold b. lia.
   intros; discriminate.
+Qed.
+
+Lemma size_no_overflow: fe.(fe_size) <= Ptrofs.max_unsigned.
+Proof.
+  generalize size_within_limit perm_limit_max. lia.
 Qed.
 
 Remark bound_stack_data_stacksize:
@@ -1088,7 +1093,7 @@ Local Opaque b fe.
   instantiate (1 := fe_stack_data fe). tauto.
   reflexivity.
   instantiate (1 := fe_stack_data fe + bound_stack_data b). rewrite Z.max_comm. reflexivity.
-  generalize (bound_stack_data_pos b) size_no_overflow; lia.
+  generalize (bound_stack_data_pos b) size_within_limit; lia.
   tauto.
   tauto.
   clear SEP. intros (j' & SEP & INCR & SAME).

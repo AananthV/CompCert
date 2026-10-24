@@ -115,6 +115,8 @@ Inductive instruction: Type :=
   | Pmovq_rm (rd: ireg) (a: addrmode)
   | Pmovl_mr (a: addrmode) (rs: ireg)
   | Pmovq_mr (a: addrmode) (rs: ireg)
+  | Pmovq_rm_u (rd: ireg) (a: addrmode)  (**r [movq], no alignment requirement *)
+  | Pmovq_mr_u (a: addrmode) (rs: ireg)  (**r [movq], no alignment requirement *)
   | Pmovsd_ff (rd: freg) (r1: freg)     (**r [movsd] (single 64-bit float) *)
   | Pmovsd_fi (rd: freg) (n: float)     (**r (pseudo-instruction) *)
   | Pmovsd_fm (rd: freg) (a: addrmode)
@@ -656,6 +658,10 @@ Definition exec_instr (f: function) (i: instruction) (rs: regset) (m: mem) : out
       exec_store Mint32 m a rs r1 nil
   | Pmovq_mr a r1 =>
       exec_store Mint64 m a rs r1 nil
+  | Pmovq_rm_u rd a =>
+      exec_load Mint64u m a rs rd
+  | Pmovq_mr_u a r1 =>
+      exec_store Mint64u m a rs r1 nil
   | Pmovsd_ff rd r1 =>
       Next (nextinstr (rs#rd <- (rs r1))) m
   | Pmovsd_fi rd n =>

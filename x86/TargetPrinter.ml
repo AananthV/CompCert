@@ -468,7 +468,7 @@ module Target(System: SYSTEM):TARGET =
           print_mov_rs oc rd id
       | Pmovl_rm(rd, a) ->
           fprintf oc "	movl	%a, %a\n" addressing a ireg32 rd
-      | Pmovq_rm(rd, a) ->
+      | Pmovq_rm(rd, a) | Pmovq_rm_u(rd, a) ->
           fprintf oc "	movq	%a, %a\n" addressing a ireg64 rd
       | Pmov_rm_a(rd, a) ->
           if Archi.ptr64
@@ -476,7 +476,7 @@ module Target(System: SYSTEM):TARGET =
           else fprintf oc "	movl	%a, %a\n" addressing a ireg32 rd
       | Pmovl_mr(a, r1) ->
           fprintf oc "	movl	%a, %a\n" ireg32 r1 addressing a
-      | Pmovq_mr(a, r1) ->
+      | Pmovq_mr(a, r1) | Pmovq_mr_u(a, r1) ->
           fprintf oc "	movq	%a, %a\n" ireg64 r1 addressing a
       | Pmov_mr_a(a, r1) ->
           if Archi.ptr64
