@@ -105,7 +105,8 @@ sequence with 3 seeds:
 - **Approved:** by the owner, 2026-10-22, for exactly the proposal on #11.
 - **Merged in:** "x86: model shift-count masking; optional masked-shift selection".
 - **Flag:** the semantic refinement is unconditional. The optimization that
-  uses it is behind `-fshift-mask`, off by default.
+  uses it is behind `-fshift-mask`: off by default when merged, **on by
+  default since 2026-10-24** (owner decision; `-O0` turns it off).
 
 **Assumption.** In `x86/Asm.v`, the variable-count shifts mask their count:
 ```coq
@@ -173,7 +174,8 @@ rewritten code.
 
 - **Approved:** by the owner, 2026-10-22, for exactly the proposal on #25.
 - **Merged in:** "x86: opt-in -fzext-load, zero-extending 8/16-bit loads with 64-bit results".
-- **Flag:** `-fzext-load`, off by default.
+- **Flag:** `-fzext-load`: off by default when merged, **on by default since
+  2026-10-24** (owner decision; `-O0` turns it off).
 
 **Assumption.** There are four new `x86/Asm.v` instructions:
 - `Pmovzbq_rm rd a` and `Pmovzwq_rm rd a` = `exec_load_zx Mint8unsigned/Mint16unsigned`,
@@ -207,7 +209,9 @@ destination against the extracted semantics:
   on #13. The first proposal was withdrawn as unprovable.
 - **Merged in:** "Bounded permissions, unaligned Mint64u chunk, and opt-in byte-load merging".
 - **Flag:** the model change is unconditional, and it leaves generated code
-  unchanged. Byte merging is behind `-fmerge-bytes`, off by default.
+  unchanged. Byte merging is behind `-fmerge-bytes`: off by default when
+  merged, **on by default since 2026-10-24** (owner decision; `-O0` turns it
+  off).
 
 **Assumption.**
 1. **Memory model** (`Memtype.v`, `Memory.v`): `perm_limit := Ptrofs.modulus - 8`.
