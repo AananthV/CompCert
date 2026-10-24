@@ -1362,3 +1362,33 @@ differs):
 - **gramschmidt** measured 1.40 in the suite run but 0.94 in a dedicated
   interleaved re-run. It is a memory-bound kernel whose times still swing
   with other users' memory traffic.
+
+---
+
+## 23. New defaults (2026-10-24)
+
+The owner decided to enable three approved trusted-base optimizations **by
+default**:
+- `-fshift-mask` (#11, nsievebits −6%);
+- `-fzext-load` (#25, siphash24 −6%);
+- `-fmerge-bytes` (#13, siphash24 −20%).
+
+`-O0` turns them off.
+
+**Verification** (24 test/c programs):
+- the new default output equals the old output with the three flags given
+  explicitly;
+- `-fno-shift-mask -fno-zext-load -fno-merge-bytes` reproduces the old
+  default exactly;
+- `-O0` output is unchanged;
+- the regression suite passes (154).
+
+**Still opt-in:**
+- `-ftrust-libm`: it changes C behaviour, because `errno` is not set, as with
+  GCC's `-fno-math-errno`;
+- `-fload-op`: its code-placement regression on syrk (+7%) is not yet
+  understood.
+
+The measurement in §22 labels "default" as the flags before this change. With
+the new defaults, the default build sits between §22's "default" and "all
+opt-in" columns.
