@@ -202,15 +202,15 @@ Processing options:
   -floadfwd      Perform global forwarding of stored and loaded values [on]
   -fredundancy   Perform redundancy elimination [on]
   -fload-op      Use memory operands in arithmetic instructions [off]
-  -fshift-mask   Rely on the hardware masking of variable shift counts [off]
+  -fshift-mask   Rely on the hardware masking of variable shift counts [on]
   -ftrust-libm   Compile calls to the libm functions sqrt and fabs as the
                  builtins __builtin_fsqrt and __builtin_fabs, assuming that
                  they compute the IEEE 754 square root and absolute value.
                  Like GCC's -fno-math-errno, errno is not set (e.g. sqrt of a
                  negative number does not set errno to EDOM) [off]
-  -fzext-load    Zero-extend 8/16-bit loads and values directly to 64 bits [off]
+  -fzext-load    Zero-extend 8/16-bit loads and values directly to 64 bits [on]
   -fmerge-bytes  Merge 8 byte loads that form a little-endian 64-bit integer
-                 into one unaligned 64-bit load (x86-64 only) [off]
+                 into one unaligned 64-bit load (x86-64 only) [on]
   -finline       Perform inlining of functions [on]
   -finline-functions-called-once Integrate functions only required by their
                  single caller [on]
@@ -276,6 +276,7 @@ let optimization_options = [
   option_fivwiden;
   option_finline; option_finline_functions_called_once;
   option_finline_small_functions; option_finline_recursive;
+  option_fshiftmask; option_fzextload; option_fmergebytes;
 ]
 
 let set_all opts () = List.iter (fun r -> r := true) opts
