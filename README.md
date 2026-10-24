@@ -29,7 +29,7 @@ used for tuning; the other two suites are held out.
 |---|---:|---:|---:|
 | CompCert 3.18 | 1.000 | 1.000 | 1.000 |
 | gcc -O1 | 0.891 | 0.931 | 0.764 |
-| **faster-compcert (default flags)** | **0.842** | **0.958** | **0.737** |
+| **faster-compcert (default flags, before 2026-10-24)** | **0.842** | **0.958** | **0.737** |
 | **faster-compcert (all opt-in flags)** | **0.822** | **0.951** | **0.739** |
 | gcc -O2, restricted to CompCert's semantic model | 0.795 | 0.874 | 0.651 |
 | gcc -O2 | 0.785 | 0.876 | 0.649 |
