@@ -9,4 +9,6 @@ Extraction "difftest_sem.ml"
   sem_addsd sem_subsd sem_mulsd sem_divsd sem_addl sem_xorl sem_andl sem_orl
   (* register instructions (#10, #11) *)
   run_regs run_mem sem_fsqrt vint vlong vfloat_bits vsingle_bits res_of_val
-  int64_of_Z Z_of_int64 int_of_Z Z_of_int.
+  int64_of_Z Z_of_int64 int_of_Z Z_of_int
+  (* unaligned 64-bit loads and stores (#13) *)
+  run_store perm_limit_tests.

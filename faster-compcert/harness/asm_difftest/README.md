@@ -13,6 +13,7 @@ semantics extracted to OCaml. The tree must be built (`make proof`).
 | `cvt`    | #10   | `Pcvtsi2sd_fr Pcvtsi2ss_fr Pcvtsl2sd_fr Pcvtsl2ss_fr Pcvtss2sd_ff Pcvtsd2ss_ff`, and `sqrtsd` (from `__builtin_fsqrt`), with the `xorpd`/`xorps` printed before them |
 | `shift`  | #11   | `Psall_rcl Pshrl_rcl Psarl_rcl Psalq_rcl Pshrq_rcl Psarq_rcl`, whose count is masked in `Asm.v` since #11 |
 | `zxload` | #25   | `Pmovzbq_rr Pmovzwq_rr Pmovzbq_rm Pmovzwq_rm` (8/16-bit zero extensions with a 64-bit result) |
+| `unal`   | #13   | `Pmovq_rm_u Pmovq_mr_u` (unaligned 64-bit loads and stores), and unit tests of the memory model around `perm_limit` |
 
 For example, `run.sh . 20000 0x1 shift` runs only the shifts.
 The script exits 1 if any group fails. Scratch files go to
@@ -85,6 +86,26 @@ The reference is always the extracted Coq semantics (`Asm.exec_instr`,
   The `info` column reports facts that are not modelled: the upper 32 bits
   are zeroed by 32-bit operations, and the upper XMM lanes are zero after
   the clear.
+
+## Group `unal`
+
+- `hw_unal.c` runs the unaligned `movq` loads and stores of
+  `unal_frame.s` (printed as `TargetPrinter.ml` prints `Pmovq_rm_u` and
+  `Pmovq_mr_u`) in two adjacent mapped pages filled with random bytes,
+  with two addressing modes (`0(%rdi)` and `disp(%rdi,%rsi,scale)`).
+  The addresses are: every offset 0..7 within a cache line (`line`),
+  across a cache line (`xline`), across the page boundary (`page`), and
+  random (`rand`); N loads and N stores of each.  It prints the 24 bytes
+  around the access before (and, for stores, after) and the result.
+- `check_unal.ml` runs `Semantics.run_mem` / `Semantics.run_store`
+  (`exec_instr` on a block holding the same 24 bytes) and requires the
+  model to be defined and to give the same 64 bits (loads) or the same
+  24 bytes after the store (stores: exactly the 8 stored bytes change,
+  little-endian).
+- It also runs `Semantics.perm_limit_tests`, which check with the
+  extracted `Mem` functions that permissions stop at `perm_limit`
+  (huge, malloc-like and ordinary blocks) and where `Mint64u` accesses
+  succeed.
 
 ## Adding an instruction
 

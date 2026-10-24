@@ -37,6 +37,7 @@ Changes, each fully proved:
 | new pass `Tailacc` (accumulator tail recursion) + bounded recursive inlining (#8) | `-ftail-acc`, `-finline-recursive-depth N` | fib 0.54x (narrow: fib only) |
 | `sqrt`/`fabs` calls become exact builtins (#12 phase 1; **trusted-base change**) | `-ftrust-libm` (off by default) | nbody 0.83x |
 | zero-extending 8/16-bit loads with 64-bit results (#25; **trusted-base change**) | `-fzext-load` (off by default) | siphash24 0.94x |
+| bounded permissions in the memory model + unaligned 64-bit chunk; byte-load merging (#13; **trusted-base change**) | `-fmerge-bytes` (off by default) | siphash24 0.79x, sha3 0.98x |
 
 Verification:
 

@@ -1262,3 +1262,50 @@ All of this is proved.
 The branch was rebased onto master by me, with the owner's permission (the
 implementing agent's own rebase attempt was blocked by the permission system).
 The two conflicts were adjacent flag declarations.
+
+---
+
+## 21. Fifth trusted-base change: bounded permissions and byte-load merging (issue #13)
+
+**History.** The first proposal claimed that 8 valid byte loads imply a valid
+unaligned 8-byte load. The implementing agent proved this **false** in Coq:
+`Mem.loadv` rejects accesses that wrap past 2^64, and a block may extend up to
+that limit. Both the agent and I stopped before writing any code.
+
+The owner chose option A: **bound permissions in the memory model** so that no
+object comes within 8 bytes of the 2^64 limit. A corrected proposal was
+prototyped first (0 admits on all six targets, generated code unchanged, key
+lemma proved), every claim was checked against the source, and only then was
+it approved (ledger entry 7).
+
+**What changed in the trusted base.**
+- **Memory model:** permissions are never granted at offsets ≥ 2^64 − 8, and
+  `alloc` clips to that limit. As a consequence, the frame-size checks in
+  Cminorgen, Stacking and Inlining are 7 bytes stricter, and globals gain a
+  size bound.
+- **`Mint64u`:** a pointer-free, unaligned 64-bit chunk.
+- **x86:** two `movq` instructions.
+
+**The optimization** (`-fmerge-bytes`, off by default).
+- CSE recognises the OR of 8 zero-extended, shifted byte loads from
+  consecutive offsets of one base. Any association is accepted, and 32-bit
+  halves are handled.
+- It replaces them with one unaligned load. Deadcode removes the now-dead byte
+  loads.
+- The soundness proof (`x86/CombineOpproof.v`, +782 lines) shows that the 8
+  byte loads imply the merged load, with the same value.
+
+**Results with `-fmerge-bytes`** (same session):
+- **siphash24 −20.6%** (86.2 → 68.4 ms; gcc-O2-ccmodel 63.5 ms, so the gap is
+  now 1.08×, from 1.36×);
+- sha3 −2%;
+- no other program's code changes.
+
+The regression suite passes by default, with the flag, and with all five
+opt-in flags together.
+
+**Not done: byte-*store* merging.**
+- CSE cannot express it: it tracks what loads return, not the memory bytes,
+  and pointer fragments would be overwritten.
+- A dedicated pass would need about 1,000 proof lines, for about 1.7 ms on
+  siphash.
