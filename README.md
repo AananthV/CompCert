@@ -28,17 +28,20 @@ used for tuning; the other two suites are held out.
 | compiler | `test/c` | big programs | PolyBench |
 |---|---:|---:|---:|
 | CompCert 3.18 | 1.000 | 1.000 | 1.000 |
-| gcc -O1 | 0.891 | 0.931 | 0.764 |
-| **faster-compcert (default flags, before 2026-10-24)** | **0.842** | **0.958** | **0.737** |
-| **faster-compcert (all opt-in flags)** | **0.822** | **0.951** | **0.739** |
-| gcc -O2, restricted to CompCert's semantic model | 0.795 | 0.874 | 0.651 |
-| gcc -O2 | 0.785 | 0.876 | 0.649 |
+| gcc -O1 | 0.893 | 0.950 | 0.756 |
+| **faster-compcert (defaults)** | **0.831** | **0.967** | **0.738** |
+| **faster-compcert (all opt-in flags)** | **0.815** | **0.961** | **0.733** |
+| gcc -O2, restricted to CompCert's semantic model | 0.795 | 0.887 | 0.648 |
+| gcc -O2 | 0.784 | 0.886 | 0.646 |
 
-Measured 2026-10-24, all compilers in one session, with interleaved timing
-(`faster-compcert/results/`). "All opt-in flags" is
-`-fload-op -fshift-mask -ftrust-libm -fzext-load -fmerge-bytes`.
-faster-compcert is faster than gcc -O1 on `test/c` and PolyBench, slightly
-slower on the big programs, and 1.05-1.14× gcc -O2's run time.
+Measured 2026-10-25 on a quiet machine, all compilers in one session, with
+interleaved timing (`faster-compcert/results/`). "All opt-in flags" adds
+`-fload-op -ftrust-libm`. Relative to gcc -O2, faster-compcert is at
+1.04-1.06× on `test/c`, 1.09× on the big programs and 1.13-1.14× on PolyBench;
+CompCert 3.18 was at 1.28×, 1.13× and 1.55×. See
+[faster-compcert/RETROSPECTIVE.md](faster-compcert/RETROSPECTIVE.md) for the
+whole project: what was done, where human input was needed, what was
+automatable, the limitations and blockers, and the roadmap.
 
 Progress so far:
 - [x] Diagnose the gap. The semantic models account for only ~1.5 points of
